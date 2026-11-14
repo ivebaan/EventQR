@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- EventPickerField (plan 5.2 "Event picker"). The host box is the filled field; the text input
+     owns the typeable query and the only focusable node, the meta line carries the date, and the
+     48dp trailing slot swaps the expand chevron for the clear glyph while a query is present. -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <com.thedavelopers.eventqr.ui.components.EventPickerInput
+        android:id="@+id/eventPickerInput"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:layout_weight="1"
+        android:background="@null"
+        android:dropDownSelector="@android:color/transparent"
+        android:hint="@string/common_select_event"
+        android:imeOptions="actionDone"
+        android:inputType="textMultiLine"
+        android:padding="0dp"
+        android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
+        android:textColor="@color/ui_text_primary"
+        android:textColorHint="@color/ui_text_secondary" />
+
+    <TextView
+        android:id="@+id/eventPickerMeta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="@dimen/space_8"
+        android:importantForAccessibility="no"
+        android:textAppearance="@style/TextAppearance.EventQR.Type.Micro"
+        android:textColor="@color/ui_text_secondary"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/eventPickerTrailing"
+        android:layout_width="@dimen/ui_touch_min"
+        android:layout_height="@dimen/ui_touch_min"
+        android:layout_gravity="center_vertical"
+        android:contentDescription="@null"
+        android:importantForAccessibility="no"
+        android:padding="@dimen/space_lg"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_ui_expand_more"
+        android:tint="@color/ui_text_secondary" />
+
+</merge>

@@ -2,7 +2,6 @@ package com.thedavelopers.eventqr.features.organizer.transactions
 
 import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.dimenPx
-import com.thedavelopers.eventqr.ui.theme.dimenFloat
 import com.thedavelopers.eventqr.features.organizer.styledText
 import com.thedavelopers.eventqr.features.organizer.cardRes
 import com.thedavelopers.eventqr.features.organizer.spacerRes
@@ -187,16 +186,8 @@ open class TransactionRulesActivity : AppCompatActivity() {
         forgetDraft()
         dismissSelectField()
         content.removeAllViews()
+        // O-RULES-07: a blocked screen is the plate, its copy and Retry - no form, no save action.
         content.addView(errorState(message) { loadData() })
-        content.addView(spacerRes(R.dimen.space_20))
-        content.addView(disabledSaveButton())
-    }
-
-    private fun disabledSaveButton() = primaryButton(getString(R.string.transaction_rules_save)) { }.apply {
-        id = R.id.txr_save_button
-        isEnabled = false
-        alpha = dimenFloat(R.dimen.alpha_disabled)
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dimenPx(R.dimen.control_height_54))
     }
 
     private fun renderUI() {
@@ -213,7 +204,6 @@ open class TransactionRulesActivity : AppCompatActivity() {
                 title = getString(R.string.transaction_rules_no_purposes_title),
                 subtext = getString(R.string.transaction_rules_no_purposes_message),
             ))
-            content.addView(disabledSaveButton())
             return
         }
 

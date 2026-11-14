@@ -55,69 +55,19 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                <!-- ═════════ Event selector: a field row, not a card wrapping a spinner ═════════ -->
+                <!-- ═════════ Event picker: the shared searchable field (plan 5.2) ═════════ -->
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:labelFor="@id/event_picker_field"
                     android:text="@string/ui_rewards_select_event"
                     android:textAppearance="@style/TextAppearance.EventQR.Type.Eyebrow" />
 
-                <LinearLayout
-                    android:id="@+id/mrw_event_selector"
+                <com.thedavelopers.eventqr.ui.components.EventPickerField
+                    android:id="@id/event_picker_field"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_8"
-                    android:addStatesFromChildren="true"
-                    android:background="@drawable/bg_ui_field"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center_vertical"
-                    android:minHeight="@dimen/ui_control_height"
-                    android:orientation="horizontal"
-                    android:paddingStart="@dimen/space_16"
-                    android:paddingEnd="@dimen/space_12">
-
-                    <ImageView
-                        android:layout_width="@dimen/icon_md"
-                        android:layout_height="@dimen/icon_md"
-                        android:contentDescription="@null"
-                        android:importantForAccessibility="no"
-                        android:src="@drawable/ic_ui_event"
-                        android:tint="@color/ui_text_secondary" />
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="@dimen/space_12"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingVertical="@dimen/space_8">
-
-                        <TextView
-                            android:id="@+id/mrw_event_summary_title"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:textAppearance="@style/TextAppearance.EventQR.Type.Title" />
-
-                        <TextView
-                            android:id="@+id/mrw_event_summary_count"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:textAppearance="@style/TextAppearance.EventQR.Type.BodySmall"
-                            android:textColor="@color/ui_text_secondary" />
-                    </LinearLayout>
-
-                    <ImageView
-                        android:layout_width="@dimen/ui_chevron"
-                        android:layout_height="@dimen/ui_chevron"
-                        android:importantForAccessibility="no"
-                        android:src="@drawable/ic_ui_expand_more"
-                        android:tint="@color/ui_text_secondary" />
-                </LinearLayout>
+                    android:layout_marginTop="@dimen/space_8" />
 
                 <!-- ═════════ The rewards switch: one 44dp row ═════════ -->
                 <LinearLayout

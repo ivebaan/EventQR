@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Event picker row label (plan 5.2 "Event picker"). The chosen row is state_activated (ListView
+     keeps state_selected for its keyboard highlight), so the label follows the fill, never a check
+     icon. Activated = ui_on_primary_container on ui_primary_container; resting = ui_text_primary. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true" android:color="@color/ui_on_primary_container" />
+    <item android:color="@color/ui_text_primary" />
+</selector>

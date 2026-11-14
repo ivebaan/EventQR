@@ -6,16 +6,20 @@ import com.thedavelopers.eventqr.ui.theme.color
 import com.thedavelopers.eventqr.ui.theme.configDpToPx
 import com.thedavelopers.eventqr.ui.theme.dimenPx
 import com.thedavelopers.eventqr.ui.theme.strong
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.lifecycleScope
+import android.content.Context
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.features.idprinting.IdCardLayoutConfig
 import com.thedavelopers.eventqr.features.organizer.*
@@ -45,12 +49,28 @@ import kotlin.math.roundToInt
  */
 class IdTemplateSettingsActivity : AppCompatActivity() {
 
-    private lateinit var repository: IdTemplateConfigRepository
+    private var repositoryFactory: (Context) -> IdTemplateConfigRepository = { IdTemplateConfigRepository(it) }
+
+    @VisibleForTesting
+    internal lateinit var repository: IdTemplateConfigRepository
+
+    /** Swapped before `create()` so the screen's load runs against a fake instead of the network. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> IdTemplateConfigRepository) {
+        repositoryFactory = factory
+    }
+
     private lateinit var eventId: String
     private lateinit var content: LinearLayout
     private lateinit var previewContainer: LinearLayout
     private lateinit var statusView: TextView
     private lateinit var saveButton: Button
+
+    /** The four option rows, in [IdCardLayoutConfig.OPTIONAL_FIELDS] order, keyed by field. */
+    private val checkboxViews = linkedMapOf<String, CheckBox>()
+
+    /** True while [refreshCheckboxes] writes programmatic state, so no toggle reaches the preview. */
+    private var bindingCheckboxes = false
 
     private val fieldStates = linkedMapOf(
         IdCardLayoutConfig.FIELD_ATTENDEE_ID to false,
@@ -70,7 +90,7 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = IdTemplateConfigRepository(this)
+        repository = repositoryFactory(this)
         eventId = intentEventId() ?: return showMissingEventScreen(getString(R.string.ui_organizer_id_template_title))
 
         content = organizerShell(
@@ -94,6 +114,8 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
         statusView = styledText("", R.dimen.type_body_compact, false).apply {
             id = com.thedavelopers.eventqr.R.id.idt_status
             setPadding(dimenPx(R.dimen.space_xs), dimenPx(R.dimen.space_sm), dimenPx(R.dimen.space_xs), 0)
+            // A save answer appears here without moving focus: announce it when it lands.
+            ViewCompat.setAccessibilityLiveRegion(this, ViewCompat.ACCESSIBILITY_LIVE_REGION_POLITE)
         }
         content.addView(statusView)
 
@@ -198,7 +220,6 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg))
         tintBlock(R.color.ui_surface, R.drawable.bg_ui_block_r16)
-        elevation = dimenPx(R.dimen.elevation_card).toFloat()
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -209,79 +230,54 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
 
     private fun buildToggleCardContent(container: LinearLayout) {
         container.removeAllViews()
-        container.addView(styledText(getString(R.string.ui_organizer_id_template_show_on_printed_id), R.dimen.type_body, true, color(R.color.text_primary)).apply {
-            setPadding(0, 0, 0, dimenPx(R.dimen.space_md))
-        })
+        checkboxViews.clear()
+
+        val title = styledText(getString(R.string.ui_organizer_id_template_show_on_printed_id), R.dimen.type_body, true, color(R.color.text_primary))
+        ViewCompat.setAccessibilityHeading(title, true)
+        title.setPadding(0, 0, 0, dimenPx(R.dimen.space_md))
+        container.addView(title)
 
         IdCardLayoutConfig.OPTIONAL_FIELDS.forEachIndexed { index, field ->
-            val isChecked = fieldStates.getValue(field)
-            val row = createToggleRow(field, isChecked) { checked ->
-                fieldStates[field] = checked
-                renderPreview()
-                buildToggleCardContent(container)
-            }
-            container.addView(row)
+            container.addView(createToggleRow(field))
 
             if (index < IdCardLayoutConfig.OPTIONAL_FIELDS.lastIndex) {
-                container.addView(createDivider())
+                // 20dp mark + 12dp drawablePadding = space_xxl 32dp: the rule starts on the label edge.
+                container.addView(createDivider(dimenPx(R.dimen.space_xxl)))
             }
         }
     }
 
-    private fun createToggleRow(
-        field: String,
-        isChecked: Boolean,
-        onToggle: (Boolean) -> Unit,
-    ): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dimenPx(R.dimen.space_md), 0, dimenPx(R.dimen.space_md))
-        isClickable = true
-        isFocusable = true
-        setOnClickListener {
-            onToggle(!isChecked)
-        }
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        )
-
-        // Custom Check Box view
-        val checkBoxView = ImageView(this@IdTemplateSettingsActivity).apply {
-            if (isChecked) {
-                setImageResource(AppIcons.Check)
-                tintBlock(R.color.ui_success, R.drawable.bg_ui_block_r4)
-                setPadding(dimenPx(R.dimen.space_3), dimenPx(R.dimen.space_3), dimenPx(R.dimen.space_3), dimenPx(R.dimen.space_3))
-                setColorFilter(color(R.color.on_primary))
-            } else {
-                setImageDrawable(null)
-                tintBlock(R.color.ui_surface, R.drawable.bg_ui_block_r4)
+    /**
+     * One option as the shared `Widget.EventQR.Ui.CheckBox` (§5.2): 20dp mark, 12dp gap, 48dp touch,
+     * label in `ui_text_primary`. `match_parent` so the whole row is the target, and the checkbox owns
+     * the toggle itself - no parent click handler, and no chevron, because these rows do not navigate.
+     */
+    private fun createToggleRow(field: String): CheckBox =
+        CheckBox(this, null, 0, R.style.Widget_EventQR_Ui_CheckBox).apply {
+            tag = field
+            text = IdCardLayoutConfig.displayName(field)
+            isChecked = fieldStates.getValue(field)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            setOnCheckedChangeListener { _, isChecked ->
+                if (bindingCheckboxes) return@setOnCheckedChangeListener
+                fieldStates[field] = isChecked
+                renderPreview()
             }
-            layoutParams = LinearLayout.LayoutParams(dimenPx(R.dimen.icon_md), dimenPx(R.dimen.icon_md))
+            checkboxViews[field] = this
         }
-        addView(checkBoxView)
 
-        // Title Text
-        addView(styledText(IdCardLayoutConfig.displayName(field), R.dimen.type_body, false, color(R.color.text_primary)).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                setMargins(dimenPx(R.dimen.space_md), 0, dimenPx(R.dimen.space_sm), 0)
-            }
-        })
-
-        // Chevron Icon
-        addView(ImageView(this@IdTemplateSettingsActivity).apply {
-            setImageResource(AppIcons.Chevron)
-            setColorFilter(color(R.color.neutral))
-            layoutParams = LinearLayout.LayoutParams(dimenPx(R.dimen.ui_chevron), dimenPx(R.dimen.ui_chevron))
-        })
-    }
-
-    private fun createDivider(): View = View(this).apply {
+    /** Hairline rule. [startInsetPx] aligns it to a row's text edge; 0 keeps it full bleed. */
+    private fun createDivider(startInsetPx: Int = 0): View = View(this).apply {
         setBackgroundColor(color(R.color.surface_muted))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             dimenPx(R.dimen.stroke_hairline),
-        )
+        ).apply {
+            if (startInsetPx > 0) marginStart = startInsetPx
+        }
     }
 
     private fun renderPreview() {
@@ -291,7 +287,6 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_20))
             tintBlock(R.color.ui_surface, R.drawable.bg_ui_block_r16)
-            elevation = dimenPx(R.dimen.elevation_card).toFloat()
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -318,7 +313,6 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg), dimenPx(R.dimen.space_lg))
             tintBlock(R.color.ui_surface, R.drawable.bg_ui_block_r16)
-            elevation = dimenPx(R.dimen.elevation_raised).toFloat()
             layoutParams = LinearLayout.LayoutParams(
                 configDp(IdCardLayoutConfig.PREVIEW_WIDTH_DP),
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -496,10 +490,14 @@ class IdTemplateSettingsActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Pushes [fieldStates] into the four rows after a load. The listener is suppressed while these
+     * programmatic writes land, and the rows are never rebuilt, so TalkBack focus stays where it was.
+     */
     private fun refreshCheckboxes() {
-        content.findViewWithTag<LinearLayout>(TOGGLES_TAG)?.let { togglesCard ->
-            buildToggleCardContent(togglesCard)
-        }
+        bindingCheckboxes = true
+        checkboxViews.forEach { (field, checkBox) -> checkBox.isChecked = fieldStates.getValue(field) }
+        bindingCheckboxes = false
     }
 
     private fun showStatus(message: String, isError: Boolean) {

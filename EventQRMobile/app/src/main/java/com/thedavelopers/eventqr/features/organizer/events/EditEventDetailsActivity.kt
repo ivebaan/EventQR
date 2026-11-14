@@ -261,7 +261,7 @@ class EditEventDetailsActivity : AppCompatActivity() {
         OrganizerEventHeadBinder.bind(
             root = head,
             title = event.title?.takeIf { it.isNotBlank() }
-                ?: getString(R.string.organizer_untitled_event),
+                ?: getString(R.string.common_untitled_event),
             status = status,
             // The badge is the STATUS row here, not a header ornament - same head as the details
             // page, so the band is the title alone and the status is never printed twice.

@@ -985,6 +985,34 @@ internal fun formatOrganizerEventDate(raw: String): String {
     return date?.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH)).orEmpty()
 }
 
+/**
+ * The date the event picker prints under an event name: the short date, falling back to the full
+ * timestamp. One helper for all three organizer hosts (plan 5.2 "Event picker").
+ */
+internal fun OrganizerMvpEvent.pickerDateLabel(): String =
+    formatOrganizerEventDate(
+        shortDate.takeIf { it.isNotBlank() && it != "-" }
+            ?: dateTime.takeIf { it != "-" }.orEmpty(),
+    )
+
+/**
+ * Picker order: upcoming and active events first, nearest date first, ended events after them
+ * (nearest ended first). Equal dates keep their incoming order, so a re-sort never shuffles a tie.
+ */
+internal fun List<OrganizerMvpEvent>.pickerOrdered(): List<OrganizerMvpEvent> {
+    val now = java.time.Instant.now()
+    fun rank(event: OrganizerMvpEvent): Int =
+        if (event.eventEndAt?.isBefore(now) == true) 1 else 0
+    fun distance(event: OrganizerMvpEvent): Long = if (rank(event) == 0) {
+        event.eventStartAt?.let { kotlin.math.abs(java.time.Duration.between(now, it).toMillis()) } ?: Long.MAX_VALUE
+    } else {
+        event.eventEndAt?.let { java.time.Duration.between(it, now).toMillis() } ?: Long.MAX_VALUE
+    }
+    return withIndex()
+        .sortedWith(compareBy({ rank(it.value) }, { distance(it.value) }, { it.index }))
+        .map { it.value }
+}
+
 /** Vertical spacer: [height] is a dimen token. */
 internal fun AppCompatActivity.spacerRes(@DimenRes height: Int): View =
     View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dimenPx(height)) }

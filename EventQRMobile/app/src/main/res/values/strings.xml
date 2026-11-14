@@ -161,7 +161,6 @@
     <string name="dialog_event_request_submitted_your_event_request_has_been_submitte">An admin reviews new events. You\'ll get a notification when yours is decided.</string>
     <string name="item_portal_option_attendee_portal">Attendee Portal</string>
     <string name="item_portal_option_events_rewards_and_your_profile">Events, rewards, and your profile</string>
-    <string name="item_portal_option_current">Current</string>
     <string name="item_transaction_log_entry">Entry</string>
 
     <!-- Extracted from Kotlin screens. -->
@@ -430,8 +429,6 @@
     <string name="manage_rewards_update_settings_failed">Could not update reward settings: %1$s</string>
     <string name="common_try_again_lower">try again.</string>
     <string name="manage_rewards_select_event">Select event</string>
-    <string name="manage_rewards_select_event_title">Select Event</string>
-    <string name="manage_rewards_untitled_event">Untitled Event</string>
     <string name="manage_rewards_unlimited">Unlimited</string>
     <string name="manage_rewards_claimed_ratio">%1$s/%2$s claimed</string>
     <string name="manage_rewards_quantity_hint">Leave blank for unlimited</string>

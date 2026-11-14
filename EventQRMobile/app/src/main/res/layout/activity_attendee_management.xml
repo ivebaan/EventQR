@@ -2,7 +2,7 @@
 <!--
     ORGANIZER - ATTENDEES (6.4).
 
-        Pass head        ORGANIZER tab, title Attendees, stub REGISTERED / CHECKED IN / EXITED
+        Pass head        Compact pass head (4.6 / 6.2), title Attendees, no eyebrow, no stat strip
         Event selector   56dp field row (not a card wrapping a hidden spinner)
         Grouped rows     avatar + name + email, one status badge, hairline divider inset 76dp
         Search           44dp icon action that opens the search screen (which owns the filters)
@@ -19,56 +19,18 @@
 
     <include
         android:id="@+id/passHead"
-        layout="@layout/include_pass_head"
+        layout="@layout/include_pass_head_compact"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <!-- Event selector: one field row. -->
-    <LinearLayout
-        android:id="@+id/layoutEventSelectorHost"
+    <!-- Event picker: the shared searchable field (plan 5.2 "Event picker"). -->
+    <com.thedavelopers.eventqr.ui.components.EventPickerField
+        android:id="@id/event_picker_field"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/ui_organizer_selector_height"
+        android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/ui_gutter"
         android:layout_marginTop="@dimen/space_12"
-        android:layout_marginEnd="@dimen/ui_gutter"
-        android:background="@drawable/bg_ui_field"
-        android:clickable="true"
-        android:focusable="true"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="@dimen/space_16"
-        android:paddingEnd="@dimen/space_12">
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/txtEventTitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
-                android:textColor="@color/ui_text_primary" />
-
-            <TextView
-                android:id="@+id/txtEventSelectorDate"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@style/TextAppearance.EventQR.Type.Micro"
-                android:textColor="@color/ui_text_secondary" />
-        </LinearLayout>
-
-        <ImageView
-            style="@style/Widget.EventQR.Ui.Selector.Caret"
-            android:importantForAccessibility="no"
-            android:layout_marginStart="@dimen/space_8" />
-    </LinearLayout>
+        android:layout_marginEnd="@dimen/ui_gutter" />
 
     <!-- Section row: eyebrow + the one search action. -->
     <LinearLayout

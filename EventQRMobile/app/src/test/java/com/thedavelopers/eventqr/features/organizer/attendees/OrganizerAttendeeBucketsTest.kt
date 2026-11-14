@@ -4,6 +4,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.features.ShadowEncryptedSharedPreferences
 import com.thedavelopers.eventqr.features.ShadowMasterKeys
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpAttendee
@@ -13,6 +14,8 @@ import com.thedavelopers.eventqr.features.organizer.registeredTotal
 import com.thedavelopers.eventqr.features.organizer.statusBucket
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -88,14 +91,28 @@ class OrganizerAttendeeBucketsTest {
     }
 
     @Test
-    fun attendeeManagementScreen_hasNoNoShowTile() {
+    fun attendeeManagementScreen_hasNoNoShowTileAndNoStatStrip() {
         val activity = Robolectric.buildActivity(AttendeeManagementActivity::class.java).create().get()
         val all = texts(activity.window.decorView)
         assertFalse("No Show tile must be hidden: $all", all.any { it.equals("No Show", ignoreCase = true) })
-        // §6.4: the counts live in the pass-head stub, labelled with the §5.4 vocabulary.
-        assertTrue(all.toString(), all.contains("Registered"))
-        assertTrue(all.toString(), all.contains("Checked in"))
-        assertTrue(all.toString(), all.contains("Exited"))
+        // §6.4: the head carries no stat strip; the numbers belong to the Reports page.
+        assertFalse(all.toString(), all.any { it.equals("Registered", ignoreCase = true) })
+        assertFalse(all.toString(), all.any { it.equals("Checked in", ignoreCase = true) })
+        assertFalse(all.toString(), all.any { it.equals("Exited", ignoreCase = true) })
+    }
+
+    @Test
+    fun attendeeManagementScreen_usesTheCompactHead() {
+        val activity = Robolectric.buildActivity(AttendeeManagementActivity::class.java).create().get()
+
+        assertEquals(
+            activity.getString(R.string.ui_organizer_attendees),
+            activity.findViewById<TextView>(R.id.passHeadTitle).text.toString(),
+        )
+        assertNotEquals(View.VISIBLE, activity.findViewById<View>(R.id.passHeadEyebrow).visibility)
+        // Selector and list still bind on the compact head.
+        assertNotNull(activity.findViewById<View>(R.id.event_picker_field))
+        assertNotNull(activity.findViewById<View>(R.id.recyclerAttendees))
     }
 
     @Test

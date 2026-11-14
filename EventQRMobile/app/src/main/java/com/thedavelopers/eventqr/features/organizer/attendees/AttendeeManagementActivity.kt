@@ -1,18 +1,12 @@
 package com.thedavelopers.eventqr.features.organizer.attendees
 
 import android.content.Intent
-import android.content.res.ColorStateList
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -28,30 +22,26 @@ import com.thedavelopers.eventqr.features.organizer.OrganizerMvpEvent
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpLoad
 import com.thedavelopers.eventqr.features.organizer.OrganizerRepository
 import com.thedavelopers.eventqr.features.organizer.bottomNav
-import com.thedavelopers.eventqr.features.organizer.formatOrganizerEventDate
-import com.thedavelopers.eventqr.features.organizer.checkedInTotal
 import com.thedavelopers.eventqr.features.organizer.intentEventId
-import com.thedavelopers.eventqr.features.organizer.registeredTotal
+import com.thedavelopers.eventqr.features.organizer.pickerDateLabel
+import com.thedavelopers.eventqr.features.organizer.pickerOrdered
 import com.thedavelopers.eventqr.features.organizer.resolveSelectedEvent
 import com.thedavelopers.eventqr.features.organizer.saveSelectedEventId
 import com.thedavelopers.eventqr.features.organizer.selectedEventId
-import com.thedavelopers.eventqr.features.organizer.statusBucket
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
-import com.thedavelopers.eventqr.ui.components.PassHeadModel
-import com.thedavelopers.eventqr.ui.components.PassStat
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
-import com.thedavelopers.eventqr.ui.theme.dimenPx
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
-import java.util.Locale
 
 /**
  * Organizer attendees list (§6.4).
  *
- * The pass head carries the three counts (REGISTERED / CHECKED IN / EXITED) - the stat-card strip is
- * gone. The event selector is a 56dp field row. Rows are grouped list rows with one status badge.
+ * The head is the compact pass head: title only, no eyebrow and no stat strip. The counts live on
+ * the Reports page. The event selector is a 56dp field row. Rows are grouped list rows with one
+ * status badge.
  */
 open class AttendeeManagementActivity : AppCompatActivity() {
     private lateinit var repository: OrganizerRepository
@@ -62,16 +52,11 @@ open class AttendeeManagementActivity : AppCompatActivity() {
     private lateinit var swipeRefresh: SwipeRefreshLayout
     private lateinit var skeletonLoading: View
     private lateinit var emptyState: EventQrEmptyState
-    private lateinit var eventSelectorHost: LinearLayout
+    private lateinit var eventPicker: EventPickerField
     private lateinit var currentEventLabel: TextView
-    private lateinit var txtEventTitle: TextView
-    private lateinit var txtEventSelectorDate: TextView
     private lateinit var passHead: View
 
     private var attendees: List<OrganizerMvpAttendee> = emptyList()
-    private var statRegistered: String? = null
-    private var statCheckedIn: String? = null
-    private var statExited: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,12 +67,10 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         repository = OrganizerRepository(this)
 
         passHead = findViewById(R.id.passHead)
-        txtEventTitle = findViewById(R.id.txtEventTitle)
-        txtEventSelectorDate = findViewById(R.id.txtEventSelectorDate)
         swipeRefresh = findViewById(R.id.swipeRefreshAttendeeManagement)
         skeletonLoading = findViewById(R.id.skeletonLoading)
         emptyState = findViewById(R.id.layoutAttendeesEmpty)
-        eventSelectorHost = findViewById(R.id.layoutEventSelectorHost)
+        eventPicker = findViewById(R.id.event_picker_field)
         currentEventLabel = findViewById(R.id.txtCurrentEventLabel)
 
         bindPassHead()
@@ -113,26 +96,9 @@ open class AttendeeManagementActivity : AppCompatActivity() {
     }
 
     private fun bindPassHead() {
-        PassHeadBinder.bind(
-            passHead,
-            PassHeadModel(
-                title = getString(R.string.ui_organizer_attendees),
-                eyebrow = getString(R.string.ui_organizer_role),
-                stats = listOf(
-                    PassStat(
-                        statRegistered ?: getString(R.string.ui_organizer_value_unavailable),
-                        getString(R.string.ui_organizer_report_registered),
-                    ),
-                    PassStat(
-                        statCheckedIn ?: getString(R.string.ui_organizer_value_unavailable),
-                        getString(R.string.ui_organizer_report_checked_in),
-                    ),
-                    PassStat(
-                        statExited ?: getString(R.string.ui_organizer_value_unavailable),
-                        getString(R.string.ui_organizer_report_exited),
-                    ),
-                ),
-            ),
+        PassHeadBinder.bindCompact(
+            root = passHead,
+            title = getString(R.string.ui_organizer_attendees),
         )
     }
 
@@ -159,14 +125,12 @@ open class AttendeeManagementActivity : AppCompatActivity() {
                 adapter = this@AttendeeManagementActivity.adapter
             }
 
-            setupEventSelector(events)
-
             val eventId = intentEventId() ?: selectedEventId().takeIf { it.isNotBlank() }
             val resolvedEvent = resolveSelectedEvent(events, eventId)
 
             if (resolvedEvent != null) {
                 selectedEvent = resolvedEvent
-                bindEventHeader()
+                bindEventPicker(events, resolvedEvent)
                 loadAttendees()
             } else {
                 showNoEventEmptyState()
@@ -174,112 +138,32 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         }
     }
 
-    private fun formatDateOnly(rawDate: String): String =
-        formatOrganizerEventDate(rawDate).ifBlank { "-" }
-
-    private fun setupEventSelector(events: List<OrganizerMvpEvent>) {
-        // `events` is already the manageable set (Approved / Active / Completed), which is exactly
-        // what the server accepts for attendee management - do not narrow it to Approved only.
-        eventSelectorHost.isClickable = events.isNotEmpty()
-        eventSelectorHost.isFocusable = events.isNotEmpty()
-
-        eventSelectorHost.setOnClickListener { anchor ->
-            if (events.isEmpty()) return@setOnClickListener
-            showEventDropdownPopup(anchor, events)
-        }
-    }
-
     /**
-     * Dropdown list on the shared card surface: `bg_ui_card`, radius 10, 48dp rows. It is a popup,
-     * not a dialog, so the selection stays anchored to the field it edits.
+     * Feeds the shared picker: the manageable set (Approved / Active / Completed) in nearest-date
+     * order, the current selection and the selection callback. `events` is already the set the
+     * server accepts for attendee management - do not narrow it to Approved only.
      */
-    private fun showEventDropdownPopup(anchor: View, events: List<OrganizerMvpEvent>) {
-        var popup: PopupWindow? = null
-        val dropdownView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = ContextCompat.getDrawable(this@AttendeeManagementActivity, R.drawable.bg_ui_card)
-            setPadding(0, dimenPx(R.dimen.space_8), 0, dimenPx(R.dimen.space_8))
-
-            events.forEach { event ->
-                val isSelected = event.id == selectedEvent?.id
-                val itemLayout = LinearLayout(this@AttendeeManagementActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    minimumHeight = dimenPx(R.dimen.ui_touch_min)
-                    setPadding(
-                        dimenPx(R.dimen.space_16),
-                        dimenPx(R.dimen.space_12),
-                        dimenPx(R.dimen.space_16),
-                        dimenPx(R.dimen.space_12),
-                    )
-                    setBackgroundColor(
-                        ContextCompat.getColor(
-                            this@AttendeeManagementActivity,
-                            if (isSelected) R.color.ui_surface_pressed else R.color.ui_surface,
-                        ),
-                    )
-                    isClickable = true
-                    isFocusable = true
-                    setOnClickListener {
-                        popup?.dismiss()
-                        selectedEvent = event
-                        repository.saveSelectedEventId(event.id)
-                        saveSelectedEventId(event.id)
-                        restoreNormalUi()
-                        bindEventHeader()
-                        loadAttendees()
-                    }
-                }
-
-                val textLayout = LinearLayout(this@AttendeeManagementActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                }
-
-                textLayout.addView(
-                    TextView(this@AttendeeManagementActivity).apply {
-                        text = event.title.ifBlank { getString(R.string.organizer_untitled_event) }
-                        setTextAppearance(R.style.TextAppearance_EventQR_Type_Title)
-                        setTextColor(
-                            ContextCompat.getColor(
-                                this@AttendeeManagementActivity,
-                                if (isSelected) R.color.ui_primary else R.color.ui_text_primary,
-                            ),
-                        )
-                        maxLines = 1
-                    },
+    private fun bindEventPicker(events: List<OrganizerMvpEvent>, selected: OrganizerMvpEvent?) {
+        eventPicker.setOnEventSelectedListener { id ->
+            val event = events.firstOrNull { it.id == id } ?: return@setOnEventSelectedListener
+            if (event.id == selectedEvent?.id) return@setOnEventSelectedListener
+            selectedEvent = event
+            repository.saveSelectedEventId(event.id)
+            saveSelectedEventId(event.id)
+            restoreNormalUi()
+            loadAttendees()
+        }
+        eventPicker.setOptions(
+            events.pickerOrdered().map {
+                EventPickerOption(
+                    id = it.id,
+                    title = it.title.ifBlank { getString(R.string.common_untitled_event) },
+                    meta = it.pickerDateLabel(),
                 )
-
-                val dateFormatted = formatDateOnly(event.shortDate)
-                if (dateFormatted.isNotBlank()) {
-                    textLayout.addView(
-                        TextView(this@AttendeeManagementActivity).apply {
-                            text = dateFormatted
-                            setTextAppearance(R.style.TextAppearance_EventQR_Type_Micro)
-                            setTextColor(ContextCompat.getColor(this@AttendeeManagementActivity, R.color.ui_text_secondary))
-                        },
-                    )
-                }
-
-                itemLayout.addView(textLayout)
-                addView(itemLayout)
-            }
-        }
-
-        popup = PopupWindow(
-            dropdownView,
-            anchor.width.takeIf { it > 0 } ?: ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true,
-        ).apply {
-            isOutsideTouchable = true
-            elevation = 0f
-            setBackgroundDrawable(null)
-        }
-
-        popup.showAsDropDown(anchor, 0, dimenPx(R.dimen.space_4))
+            },
+            selected?.id,
+        )
     }
-
     private fun refreshSelectedEventAttendees() {
         val event = selectedEvent ?: return
         lifecycleScope.launch {
@@ -296,7 +180,7 @@ open class AttendeeManagementActivity : AppCompatActivity() {
                 selectedEvent = latestSelectedEvent
                 repository.saveSelectedEventId(latestSelectedEvent.id)
                 saveSelectedEventId(latestSelectedEvent.id)
-                bindEventHeader()
+                bindEventPicker(eventsLoad.data, latestSelectedEvent)
             }
             loadAttendees()
         }
@@ -321,12 +205,6 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         }
     }
 
-    private fun bindEventHeader() {
-        val event = selectedEvent ?: return
-        txtEventTitle.text = event.title.ifBlank { getString(R.string.organizer_choose_an_event) }
-        txtEventSelectorDate.text = formatDateOnly(event.shortDate)
-    }
-
     private fun showNoEventEmptyState() {
         skeletonLoading.visibility = View.GONE
         swipeRefresh.isEnabled = false
@@ -336,8 +214,6 @@ open class AttendeeManagementActivity : AppCompatActivity() {
             getString(R.string.attendee_management_no_event_selected),
             getString(R.string.attendee_management_select_an_event_from_the_dropdown_ab),
         )
-        txtEventTitle.text = getString(R.string.attendee_management_choose_an_event)
-        txtEventSelectorDate.text = "-"
     }
 
     /** The event list failed to load (not "no events"): say so and let a pull-to-refresh retry. */
@@ -348,7 +224,7 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         swipeRefresh.isRefreshing = false
         swipeRefresh.isEnabled = true
         currentEventLabel.visibility = View.GONE
-        eventSelectorHost.visibility = View.GONE
+        eventPicker.visibility = View.GONE
         emptyState.visibility = View.VISIBLE
         emptyState.show(
             getString(R.string.organizer_dashboard_events_load_failed),
@@ -364,7 +240,7 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         eventsLoadFailed = false
         swipeRefresh.isRefreshing = false
         currentEventLabel.visibility = View.VISIBLE
-        eventSelectorHost.visibility = View.VISIBLE
+        eventPicker.visibility = View.VISIBLE
         emptyState.visibility = View.GONE
     }
 
@@ -372,8 +248,7 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         skeletonLoading.visibility = View.GONE
         swipeRefresh.isEnabled = false
         currentEventLabel.visibility = View.GONE
-        txtEventSelectorDate.visibility = View.GONE
-        eventSelectorHost.visibility = View.GONE
+        eventPicker.visibility = View.GONE
         emptyState.visibility = View.VISIBLE
         emptyState.show(
             getString(R.string.attendee_management_no_events_available),
@@ -385,19 +260,10 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         currentEventLabel.visibility = View.VISIBLE
         swipeRefresh.isEnabled = true
         emptyState.visibility = View.GONE
-        txtEventSelectorDate.visibility = View.VISIBLE
     }
 
     private fun render(load: OrganizerMvpLoad<List<OrganizerMvpAttendee>>) {
         skeletonLoading.visibility = View.GONE
-        val checkedIn = attendees.checkedInTotal()
-        val exited = attendees.count { it.statusBucket() == "Exited" }
-
-        // Total counts only attendees the backend counts as registered (Cancelled / No Show are excluded).
-        statRegistered = formatCount(attendees.registeredTotal())
-        statCheckedIn = formatCount(checkedIn)
-        statExited = formatCount(exited)
-        bindPassHead()
 
         adapter.submitItems(attendees)
         emptyState.visibility = if (attendees.isEmpty()) View.VISIBLE else View.GONE
@@ -418,9 +284,6 @@ open class AttendeeManagementActivity : AppCompatActivity() {
             }
         }
     }
-
-    private fun formatCount(value: Int): String =
-        NumberFormat.getIntegerInstance(Locale.getDefault()).format(value)
 
     private fun openDetails(attendee: OrganizerMvpAttendee) {
         val event = selectedEvent ?: return

@@ -1,12 +1,9 @@
 package com.thedavelopers.eventqr.features.organizer
 
-import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -100,119 +97,4 @@ internal fun <T> AppCompatActivity.dataSourceBanner(load: OrganizerMvpLoad<T>): 
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { setMargins(0, 0, 0, dimenPx(R.dimen.space_8)) }
     }
-}
-
-/**
- * Event selector as a 56dp field row (§6.4 Reports): title + date, one 16dp caret. The dropdown
- * is a plain surface popup - it is not a card wrapping a hidden spinner.
- */
-internal fun AppCompatActivity.eventSelector(
-    events: List<OrganizerMvpEvent>,
-    selectedEventId: String,
-    onSelected: (OrganizerMvpEvent) -> Unit,
-): View {
-    val approvedEvents = events.approvedOnly()
-    val titles = approvedEvents.map { it.title.ifBlank { getString(R.string.organizer_untitled_event) } }
-    var selectedIndex = approvedEvents.indexOfFirst { it.id == selectedEventId }.takeIf { it >= 0 } ?: 0
-    if (approvedEvents.isEmpty()) selectedIndex = -1
-
-    val titleText = styledText(
-        titles.getOrNull(selectedIndex) ?: getString(R.string.organizer_select_event),
-        R.dimen.ui_type_body,
-        false,
-        orgColors.text,
-    )
-    val arrow = ImageView(this).apply {
-        layoutParams = LinearLayout.LayoutParams(dimenPx(R.dimen.ui_chevron), dimenPx(R.dimen.ui_chevron))
-        setImageResource(AppIcons.Expand)
-        imageTintList = android.content.res.ColorStateList.valueOf(color(R.color.ui_text_secondary))
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
-    val field = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dimenPx(R.dimen.space_16), 0, dimenPx(R.dimen.space_12), 0)
-        minimumHeight = dimenPx(R.dimen.ui_organizer_selector_height)
-        isClickable = approvedEvents.isNotEmpty()
-        isFocusable = approvedEvents.isNotEmpty()
-        background = ContextCompat.getDrawable(context, R.drawable.bg_ui_field)
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dimenPx(R.dimen.ui_organizer_selector_height),
-        )
-        addView(titleText.apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-        addView(arrow.apply { layoutParams = LinearLayout.LayoutParams(dimenPx(R.dimen.ui_chevron), dimenPx(R.dimen.ui_chevron)) })
-    }
-
-    var popup: PopupWindow? = null
-
-    fun buildDropdown(): LinearLayout = LinearLayout(this@eventSelector).apply {
-        orientation = LinearLayout.VERTICAL
-        background = ContextCompat.getDrawable(this@eventSelector, R.drawable.bg_ui_card)
-        setPadding(0, dimenPx(R.dimen.space_8), 0, dimenPx(R.dimen.space_8))
-        approvedEvents.forEachIndexed { index, event ->
-            val selected = index == selectedIndex
-            addView(
-                LinearLayout(this@eventSelector).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    minimumHeight = dimenPx(R.dimen.ui_touch_min)
-                    setPadding(
-                        dimenPx(R.dimen.space_16),
-                        dimenPx(R.dimen.space_12),
-                        dimenPx(R.dimen.space_16),
-                        dimenPx(R.dimen.space_12),
-                    )
-                    setBackgroundColor(
-                        ContextCompat.getColor(
-                            this@eventSelector,
-                            if (selected) R.color.ui_surface_pressed else R.color.ui_surface,
-                        ),
-                    )
-                    setOnClickListener {
-                        selectedIndex = index
-                        titleText.text = titles[index]
-                        titleText.setTextColor(orgColors.text)
-                        popup?.dismiss()
-                        onSelected(event)
-                    }
-                    addView(
-                        TextView(this@eventSelector).apply {
-                            text = titles[index]
-                            setTextAppearance(R.style.TextAppearance_EventQR_Type_Title)
-                            setTextColor(
-                                ContextCompat.getColor(
-                                    this@eventSelector,
-                                    if (selected) R.color.ui_primary else R.color.ui_text_primary,
-                                ),
-                            )
-                            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        },
-                    )
-                },
-            )
-        }
-    }
-
-    field.setOnClickListener {
-        if (approvedEvents.isEmpty()) return@setOnClickListener
-        popup?.dismiss()
-        popup = PopupWindow(
-            buildDropdown(),
-            field.width.takeIf { it > 0 } ?: ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true,
-        ).apply {
-            isOutsideTouchable = true
-            elevation = 0f
-            setBackgroundDrawable(ColorDrawable(0x00000000))
-        }
-        popup?.showAsDropDown(field, 0, dimenPx(R.dimen.space_4))
-    }
-
-    return field
 }

@@ -4,8 +4,7 @@
 
         Top bar        56dp, hairline under
         Identity       pass-head anatomy (§4.6) at per-event scale: event name headline on the
-                       full band, a quiet dot + status line under it (§5.4 on-dark exception),
-                       1dp tear, then three stat slots on the ui_pass_stub tonal band
+                       full band, 1dp tear, then three stat slots on the ui_pass_stub tonal band
         Manage         ONE grouped card holding the five management rows, 16dp chevrons
 
     Deleted: the #0F172A -> primary_dark -> primary 3-stop GradientDrawable banner, the 96dp
@@ -49,8 +48,8 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <!-- Block A: identity. The name owns the full band; status is the quiet dot +
-                     word line under it (§5.4 placement exception on a dark ui_primary band). -->
+                <!-- Block A: identity. The name owns the full band; the block's own space_16 bottom
+                     padding is the only thing between the title and the tear. -->
                 <LinearLayout
                     android:id="@+id/emh_header_identity"
                     android:layout_width="match_parent"
@@ -72,36 +71,6 @@
                         android:textAppearance="@style/TextAppearance.EventQR.Type.Headline"
                         android:textColor="@color/ui_on_primary"
                         tools:text="DevFest Manila 2026" />
-
-                    <!-- Quiet status line: opaque 6dp dot + muted word, one TalkBack node.
-                         invisible by default so the band keeps its height before the first bind. -->
-                    <LinearLayout
-                        android:id="@+id/emh_status_row"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/space_8"
-                        android:gravity="center_vertical|start"
-                        android:orientation="horizontal"
-                        android:visibility="invisible"
-                        tools:visibility="visible">
-
-                        <View
-                            android:id="@+id/emh_status_dot"
-                            android:layout_width="@dimen/ui_badge_dot"
-                            android:layout_height="@dimen/ui_badge_dot"
-                            android:layout_marginEnd="@dimen/ui_badge_dot_gap"
-                            android:background="@drawable/bg_ui_dot_solid"
-                            android:importantForAccessibility="no" />
-
-                        <TextView
-                            android:id="@+id/emh_status_text"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:importantForAccessibility="no"
-                            android:textAppearance="@style/TextAppearance.EventQR.Type.Label"
-                            android:textColor="@color/ui_text_on_dark_muted"
-                            tools:text="Active" />
-                    </LinearLayout>
                 </LinearLayout>
 
                 <!-- Tear line: full bleed, 1dp. -->

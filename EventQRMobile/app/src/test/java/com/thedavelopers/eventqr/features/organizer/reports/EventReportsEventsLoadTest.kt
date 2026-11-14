@@ -11,8 +11,12 @@ import com.thedavelopers.eventqr.features.ShadowMasterKeys
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpDataSource
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpEvent
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpLoad
+import com.thedavelopers.eventqr.features.organizer.OrganizerRepository
 import com.thedavelopers.eventqr.features.organizer.allTexts
 import com.thedavelopers.eventqr.features.organizer.findButton
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerInput
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -95,6 +99,12 @@ class EventReportsEventsLoadTest {
             NetworkResult.Success(EventReportSummaryDto())
     }
 
+    /** No network: the initial load must not race the test's own onEventsLoaded call. */
+    private class FakeOrganizerRepository(context: android.content.Context) : OrganizerRepository(context) {
+        override suspend fun loadApprovedOrganizerEvents(): OrganizerMvpLoad<List<OrganizerMvpEvent>> =
+            OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.BACKEND)
+    }
+
     @Test
     fun eventSelector_usesTheAlreadyLoadedEventList() {
         val activity = build()
@@ -106,6 +116,29 @@ class EventReportsEventsLoadTest {
 
         assertTrue(activity.texts().contains("Night Market"))
         assertNull(activity.window.decorView.findButton(activity.getString(R.string.organizer_retry)))
+    }
+
+    @Test
+    fun selectingAnEvent_rebuildsTheListWithNoOpenPopup() {
+        val controller = Robolectric.buildActivity(EventReportsActivity::class.java)
+        controller.get().installRepositoryFactory { FakeOrganizerRepository(it) }
+        val activity = controller.create().get()
+        activity.reportsRepository = FakeReportsRepository()
+        val events = listOf(testOrganizerEvent("Night Market"), testOrganizerEvent("Day Fair"))
+        activity.onEventsLoaded(OrganizerMvpLoad(events, OrganizerMvpDataSource.BACKEND))
+
+        val input = activity.findViewById<EventPickerField>(R.id.event_picker_field)
+            .findViewById<EventPickerInput>(R.id.eventPickerInput)
+        input.performClick()
+        assertTrue(input.isPopupShowing)
+
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val rebuilt = activity.findViewById<EventPickerField>(R.id.event_picker_field)
+            .findViewById<EventPickerInput>(R.id.eventPickerInput)
+        assertFalse(rebuilt.isPopupShowing)
+        assertEquals("Day Fair", rebuilt.text.toString())
     }
 
     @Test

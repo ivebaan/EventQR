@@ -44,8 +44,6 @@
 
     <!-- Event management hub (6.4) -->
     <string name="ui_organizer_hub_title">Manage event</string>
-    <!-- TalkBack name for the quiet dot + status line under the title. -->
-    <string name="ui_organizer_hub_status_a11y">Status: %1$s</string>
 
     <!-- Event details, read-only (6.4) -->
     <string name="ui_organizer_event_details_title">Event details</string>
@@ -162,6 +160,15 @@
     <string name="ui_organizer_id_template_preview_title">ID Preview</string>
     <!-- Preview sample attendee: a fixed placeholder, never translated. -->
     <string name="ui_organizer_id_template_sample_name" translatable="false">Juan Dela Cruz</string>
+
+    <!-- Event picker (plan 5.2 "Event picker") -->
+    <string name="ui_event_picker_no_match">No matching events</string>
+    <string name="ui_event_picker_clear">Clear search</string>
+    <string name="ui_event_picker_loading">Loading events</string>
+    <plurals name="ui_event_picker_results">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
 
     <!-- Dialogs / destructive confirms -->
 

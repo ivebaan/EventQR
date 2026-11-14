@@ -2,6 +2,8 @@ package com.thedavelopers.eventqr.features.organizer.reports
 
 import android.content.Context
 import android.os.Looper
+import android.text.Spanned
+import android.text.style.UnderlineSpan
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -84,6 +86,13 @@ class EventReportsGenerateAllTest {
     private fun EventReportsActivity.action(): TextView =
         requireNotNull(findViewById<TextView>(R.id.eventReportsGenerateAll)) { "the bulk action must exist" }
 
+    /**
+     * The underline is markup in the label (`<u>Generate all</u>`), so it only exists while the
+     * label is the resource span: the busy label is a plain `String` from `getString()`.
+     */
+    private fun TextView.underlineSpans(): Int =
+        (text as? Spanned)?.getSpans(0, text.length, UnderlineSpan::class.java)?.size ?: 0
+
     /** Only the visible tree: the summary strip carries a Retry of its own while hidden. */
     private fun View.findVisibleText(label: String): TextView? {
         if (visibility != View.VISIBLE) return null
@@ -98,6 +107,8 @@ class EventReportsGenerateAllTest {
         val action = activity.action()
 
         assertEquals("Generate all", action.text.toString())
+        assertEquals("the label carries the link underline as a live span", 1, action.underlineSpans())
+        assertEquals("ui_primary label", ContextCompat.getColor(activity, R.color.ui_primary), action.currentTextColor)
 
         val row = action.parent as LinearLayout
         assertEquals("the heading row is horizontal", LinearLayout.HORIZONTAL, row.orientation)
@@ -144,6 +155,7 @@ class EventReportsGenerateAllTest {
 
         assertEquals("Generating…", action.text.toString())
         assertFalse("no second run while one is live", action.isEnabled)
+        assertEquals("the busy label is not a link", 0, action.underlineSpans())
         assertEquals(
             "the disabled label is the token, not an alpha",
             ContextCompat.getColor(activity, R.color.ui_text_disabled),
@@ -170,6 +182,7 @@ class EventReportsGenerateAllTest {
         )
         assertEquals("Generate all", action.text.toString())
         assertTrue(action.isEnabled)
+        assertEquals("the reset restores the underlined label", 1, action.underlineSpans())
     }
 
     @Test
@@ -199,6 +212,7 @@ class EventReportsGenerateAllTest {
         assertFalse("no progress line left behind", texts.any { it.startsWith("Generating report") })
         assertTrue("the action is usable again", action.isEnabled)
         assertEquals("Generate all", action.text.toString())
+        assertEquals("the reset restores the underlined label", 1, action.underlineSpans())
         assertEquals("the first failure ends the run", 1, fake.generated.size)
 
         val retry = requireNotNull(activity.window.decorView.findVisibleText(activity.getString(R.string.common_retry)))

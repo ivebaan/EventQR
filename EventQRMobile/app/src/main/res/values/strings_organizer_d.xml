@@ -4,8 +4,6 @@
     <string name="attendee_details_record_not_found">Attendee record not found for this event.</string>
     <string name="attendee_details_points_value">%1$d pts</string>
     <string name="attendee_details_no_activity_yet">No activity yet</string>
-    <string name="organizer_untitled_event">Untitled Event</string>
-    <string name="organizer_select_event">Select Event</string>
     <string name="organizer_choose_an_event">Choose an Event</string>
     <string name="organizer_try_again_later">Please try again later.</string>
     <string name="organizer_selected_event">Selected Event</string>
@@ -72,7 +70,11 @@
     <string name="event_reports_no_events_subtext">You don\'t have any approved events yet.</string>
     <string name="event_reports_generate_reports">Generate reports</string>
     <string name="event_reports_summary_failed">Could not load the event totals.</string>
-    <string name="event_reports_generate_all">Generate all</string>
+    <!-- Underline markup is the section action's link affordance (plan 5.1). This label's only
+         consumer is the one bulk-action view, which sets it in code, so it renders through the
+         Activity's getText() - getString() would strip the span.
+         Any future translation must keep the <u>...</u> markup, or the underline silently disappears. -->
+    <string name="event_reports_generate_all"><u>Generate all</u></string>
     <string name="event_reports_generating_all">Generating…</string>
     <string name="event_reports_generating_progress">Generating report %1$d of %2$d…</string>
     <string name="event_reports_generating_state">Generating</string>

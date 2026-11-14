@@ -1698,6 +1698,22 @@ class ComponentInflationTest {
             context.getString(R.string.ui_organizer_edit_discard_title),
             dialog.window?.attributes?.title?.toString(),
         )
+        // `AlertDialog.setTitle` would route through `AlertController` and paint its own title
+        // panel, so the heading would appear twice. The window title is published, the panel is not.
+        val painted = visibleTextViews(
+            requireNotNull(dialog.window).decorView,
+            context.getString(R.string.ui_organizer_edit_discard_title),
+        )
+        assertEquals(
+            "exactly one visible title, the `dialog_base` heading; got ${painted.size}",
+            1,
+            painted.size,
+        )
+        assertEquals(
+            "and it is the heading, not an `AlertController` title",
+            R.id.dialogTitle,
+            painted.single().id,
+        )
         assertEquals(
             context.getString(R.string.ui_organizer_edit_discard_body),
             dialog.findViewById<android.widget.TextView>(R.id.dialogBody)?.text.toString(),
@@ -1886,6 +1902,21 @@ class ComponentInflationTest {
         val found = mutableListOf<TextView>()
         fun visit(view: View) {
             if (view is TextView && view.isAccessibilityHeading) found += view
+            if (view is ViewGroup) for (index in 0 until view.childCount) visit(view.getChildAt(index))
+        }
+        visit(root)
+        return found
+    }
+
+    /**
+     * Visible `TextView`s whose text is exactly [text], with every ancestor visible: a match under a
+     * `GONE` parent is not on screen and must not count as a painted title.
+     */
+    private fun visibleTextViews(root: View, text: String): List<TextView> {
+        val found = mutableListOf<TextView>()
+        fun visit(view: View) {
+            if (view.visibility != View.VISIBLE) return
+            if (view is TextView && view.text.toString() == text) found += view
             if (view is ViewGroup) for (index in 0 until view.childCount) visit(view.getChildAt(index))
         }
         visit(root)

@@ -111,6 +111,14 @@ class TransactionRulesActivityTest {
         return null
     }
 
+    /** Visible `TextView`s with exactly [label]; a match under a `GONE` parent is not on screen. */
+    private fun View.countVisibleText(label: String): Int {
+        if (visibility != View.VISIBLE) return 0
+        var count = if (this is TextView && text.toString() == label) 1 else 0
+        if (this is ViewGroup) for (i in 0 until childCount) count += getChildAt(i).countVisibleText(label)
+        return count
+    }
+
     /** The row whose own label is [label]; the menu rows are the clickable group holding one text. */
     private fun View.findMenuRow(label: String): View? {
         if (this is ViewGroup) {
@@ -294,18 +302,30 @@ class TransactionRulesActivityTest {
         assertNull("a purpose without an id cannot be edited", popup.contentView.findMenuRow("Ghost"))
     }
 
+    /** O-RULES-07: a blocked screen is the plate, its copy and `Retry` - no field, no save action. */
     @Test
-    fun emptyAndErrorStatesRenderNoField() {
+    fun emptyAndErrorStatesRenderNoFieldAndNoSaveAction() {
+        val saveLabel = context.getString(R.string.transaction_rules_save)
+
         val empty = Robolectric.buildActivity(TransactionRulesActivity::class.java).create().get()
         empty.buildScreen(event(), emptyList(), emptyList())
         assertNull(empty.findViewById<View>(R.id.txr_purpose_field))
-        assertNotNull(empty.findViewById<View>(R.id.txr_save_button))
+        assertNull(empty.findViewById<View>(R.id.txr_save_button))
+        assertNull("no status line without a form", empty.findViewById<View>(R.id.txr_save_status))
+        assertFalse(
+            "no save label anywhere on the blocked screen",
+            empty.window.decorView.allTexts().contains(saveLabel),
+        )
 
         val failed = Robolectric.buildActivity(TransactionRulesActivity::class.java).create().get()
         failed.buildScreen(event(), listOf(purpose("Entry", entryId)), emptyList())
         failed.renderLoadError("Couldn't load transaction rules")
         assertNull(failed.findViewById<View>(R.id.txr_purpose_field))
-        assertNotNull(failed.findViewById<View>(R.id.txr_save_button))
+        assertNull(failed.findViewById<View>(R.id.txr_save_button))
+        assertFalse(
+            "no save label anywhere on the failed screen",
+            failed.window.decorView.allTexts().contains(saveLabel),
+        )
     }
 
     // ------------------------------------------------------------ unsaved edits (§6.4)
@@ -358,6 +378,15 @@ class TransactionRulesActivityTest {
         assertEquals(
             activity.getString(R.string.ui_organizer_edit_discard_title),
             dialog.findViewById<TextView>(R.id.dialogTitle)!!.text.toString(),
+        )
+        // The shared dialog publishes its title on the window only; a second visible copy would mean
+        // `AlertController` painted its own title panel above the `dialog_base` heading.
+        assertEquals(
+            "exactly one visible title on the Transaction rules surface too",
+            1,
+            requireNotNull(dialog.window).decorView.countVisibleText(
+                activity.getString(R.string.ui_organizer_edit_discard_title),
+            ),
         )
         assertEquals(
             activity.getString(R.string.transaction_rules_discard_switch_body, "Entry", "Booth"),
@@ -425,7 +454,11 @@ class TransactionRulesActivityTest {
         val activity = screenOf(SuccessSaveActivity::class.java)
         allowDuplicate(activity).performClick()
 
-        activity.findViewById<View>(R.id.txr_save_button).performClick()
+        val save = activity.findViewById<Button>(R.id.txr_save_button)
+        assertNotNull("the loaded form carries its save action", save)
+        assertTrue("the form's save action is live", save.isEnabled)
+        assertEquals(activity.getString(R.string.transaction_rules_save), save.text.toString())
+        save.performClick()
         shadowOf(Looper.getMainLooper()).idle()
 
         assertEquals(

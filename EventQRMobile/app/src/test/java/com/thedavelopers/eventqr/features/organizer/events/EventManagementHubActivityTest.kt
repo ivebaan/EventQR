@@ -5,16 +5,12 @@ import android.content.Intent
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
-import com.thedavelopers.eventqr.core.api.dto.EventStatus
 import com.thedavelopers.eventqr.features.ShadowEncryptedSharedPreferences
 import com.thedavelopers.eventqr.features.ShadowMasterKeys
-import com.thedavelopers.eventqr.features.attendee.AttendeeBadges
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_ID
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpEvent
 import com.thedavelopers.eventqr.features.organizer.OrganizerRepository
@@ -37,8 +33,9 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The Manage event hub's quiet status line (§6.4, §5.4 on-dark exception): the band is the title
- * alone and the status is a 6dp dot + muted word under it, one TalkBack node.
+ * The Manage event hub's identity band (§6.4): the title owns the full `ui_primary` band, the
+ * stats strip follows the tear, and no status line sits under the title (the quiet dot + word line
+ * of v1.22 was removed in v1.46).
  *
  * The activity is created but never resumed, so the screen's own load never runs and `bindEvent`
  * is the only writer; the repository seam only keeps the constructor off the network.
@@ -122,77 +119,29 @@ class EventManagementHubActivityTest {
         eventEndAt = end,
     )
 
-    /** One fixture per status the screen can resolve; the date-derived ones drive the window. */
-    private fun cases(): List<Pair<EventStatus, OrganizerMvpEvent>> {
-        val now = Instant.now()
-        return listOf(
-            EventStatus.DRAFT to event(status = "Draft"),
-            EventStatus.PENDING_REVIEW to event(status = "Pending Review"),
-            EventStatus.REJECTED to event(status = "Rejected"),
-            EventStatus.CANCELLED to event(status = "Cancelled"),
-            EventStatus.UNKNOWN to event(status = "Awaiting clearance"),
-            EventStatus.APPROVED to event(
-                status = "Approved",
-                start = now.plusSeconds(3_600),
-                end = now.plusSeconds(7_200),
-            ),
-            EventStatus.ACTIVE to event(
-                status = "Approved",
-                start = now.minusSeconds(3_600),
-                end = now.plusSeconds(3_600),
-            ),
-            EventStatus.ENDED to event(
-                status = "Approved",
-                start = now.minusSeconds(7_200),
-                end = now.minusSeconds(3_600),
-            ),
-        )
-    }
-
     @Test
-    fun statusLine_bindsLabelDotAndOneA11yNodeForEveryStatus() {
-        val activity = build()
-        val row = activity.findViewById<View>(R.id.emh_status_row)
-        val dot = activity.findViewById<View>(R.id.emh_status_dot)
-        val label = activity.findViewById<TextView>(R.id.emh_status_text)
-
-        assertEquals(EventStatus.values().size, cases().size)
-        cases().forEach { (status, event) ->
-            activity.bindEvent(event)
-
-            val expectedLabel = AttendeeBadges.label(activity, status)
-            assertEquals("$status label", expectedLabel, label.text.toString())
-            assertEquals(
-                "$status dot token",
-                ContextCompat.getColor(activity, AttendeeBadges.onDarkDotColorRes(status)),
-                ViewCompat.getBackgroundTintList(dot)?.defaultColor,
-            )
-            assertEquals(
-                "$status a11y name",
-                activity.getString(R.string.ui_organizer_hub_status_a11y, expectedLabel),
-                row.contentDescription,
-            )
-            assertEquals("$status row visible", View.VISIBLE, row.visibility)
-            assertTrue("$status is one TalkBack node", ViewCompat.isScreenReaderFocusable(row))
-            assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, dot.importantForAccessibility)
-            assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, label.importantForAccessibility)
-        }
-    }
-
-    @Test
-    fun statusLine_neverPaintsTheWordLime() {
+    fun statusLine_isGoneFromTheBandAndTheBindStillFillsTheHead() {
         val activity = build()
 
-        activity.bindEvent(
-            event(status = "Approved", start = Instant.now().minusSeconds(60), end = Instant.now().plusSeconds(60)),
-        )
+        activity.bindEvent(event())
 
-        val label = activity.findViewById<TextView>(R.id.emh_status_text)
+        // The status line and its ids are retired (plan v1.46), so the name resolves to nothing.
         assertEquals(
-            "the word stays muted on dark; lime is the dot fill only",
-            ContextCompat.getColor(activity, R.color.ui_text_on_dark_muted),
-            label.currentTextColor,
+            "the hub has no status line under the title",
+            0,
+            activity.resources.getIdentifier("emh_status_row", "id", activity.packageName),
         )
+        // The title is now the band's only child: no leftover row keeps the band's height.
+        val identity = activity.findViewById<LinearLayout>(R.id.emh_header_identity)
+        assertEquals(1, identity.childCount)
+
+        assertEquals(
+            "DevFest Manila 2026",
+            activity.findViewById<TextView>(R.id.emh_event_title).text.toString(),
+        )
+        assertEquals("128", activity.findViewById<TextView>(R.id.emh_stat_registered).text.toString())
+        assertEquals("200", activity.findViewById<TextView>(R.id.emh_stat_capacity).text.toString())
+        assertEquals("72", activity.findViewById<TextView>(R.id.emh_stat_available).text.toString())
     }
 
     @Test
@@ -236,62 +185,12 @@ class EventManagementHubActivityTest {
     }
 
     @Test
-    fun statusLine_atFontScaleTwo_wrapsWithoutClippingAndKeepsTheSixDpDot() {
-        val activity = build(fontScale = 2.0f)
-        activity.bindEvent(event(status = "Pending Review"))
-        val row = activity.findViewById<View>(R.id.emh_status_row)
-        val dot = activity.findViewById<View>(R.id.emh_status_dot)
-        val label = activity.findViewById<TextView>(R.id.emh_status_text)
-
-        // A real long label is the wrap case; the row has no maxLines and the dot is a fixed 6dp.
-        label.text = "Pending review awaiting administrator approval"
-        val width = (320 * activity.resources.displayMetrics.density).toInt()
-        row.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
-        row.layout(0, 0, row.measuredWidth, row.measuredHeight)
-
-        val dotSize = activity.resources.getDimensionPixelSize(R.dimen.ui_badge_dot)
-        assertEquals(dotSize, dot.measuredWidth)
-        assertEquals(dotSize, dot.measuredHeight)
-        assertEquals(Int.MAX_VALUE, label.maxLines)
-        assertTrue(
-            "the label wraps instead of truncating " +
-                "(lines=${label.lineCount}, label=${label.measuredWidth}x${label.measuredHeight}, " +
-                "row=${row.measuredWidth}x${row.measuredHeight})",
-            label.lineCount >= 2,
-        )
-        assertTrue("nothing clips: the row is as tall as its tallest child", row.measuredHeight >= label.measuredHeight)
-        assertEquals(
-            "the dot stays centred on the wrapped label",
-            (row.measuredHeight - dot.measuredHeight) / 2,
-            dot.top,
-        )
-        assertTrue("the dot ends inside the row", dot.bottom <= row.measuredHeight)
-        assertTrue("the row keeps the 8dp gap", (row.layoutParams as LinearLayout.LayoutParams).topMargin > 0)
-    }
-
-    @Test
-    fun statusRow_isInvisibleUntilBindAndVisibleAfter() {
-        val activity = build()
-        val row = activity.findViewById<View>(R.id.emh_status_row)
-
-        assertEquals("the band keeps its height before the first bind", View.INVISIBLE, row.visibility)
-
-        activity.bindEvent(event(status = "Draft"))
-
-        assertEquals(View.VISIBLE, row.visibility)
-    }
-
-    @Test
-    fun statusLine_errorPath_dropsTheRowWithTheBand() {
+    fun errorPath_replacesTheBandWithTheLoadingAndErrorStates() {
         val activity = build(resume = true, factory = { ErrorRepository(it) })
 
         // showStateCard() swaps the band's children for the loading + error states.
         val banner = activity.findViewById<LinearLayout>(R.id.emh_header_banner)
         assertEquals(2, banner.childCount)
-        assertNull("the error state has no status line", activity.findViewById<View>(R.id.emh_status_row))
         assertNull("the error state has no identity band", activity.findViewById<View>(R.id.emh_header_identity))
     }
 

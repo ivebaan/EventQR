@@ -2,6 +2,12 @@
   "//": "Fixed-height gate exemptions (tools/check-tokens.ps1, category fixed-height). One entry per genuinely non-text element that must keep a fixed box: a plate, a bar, a bracket, a dot. A text-bearing view never belongs here - it takes wrap_content + minHeight instead. Entry shape: file (path under res/), id (\"\" when the element has no android:id, or the style name), height (the exact layout_height value, or \"maxHeight\"), why. An entry that matches nothing fails the `stale` category.",
   "entries": [
     {
+      "file": "layout/view_event_picker_field.xml",
+      "id": "eventPickerTrailing",
+      "height": "@dimen/ui_touch_min",
+      "why": "48dp trailing slot for the chevron/clear glyph; not text, must not grow with fontScale"
+    },
+    {
       "file": "layout/activity_staff_dashboard.xml",
       "id": "",
       "height": "@dimen/ui_row_height",

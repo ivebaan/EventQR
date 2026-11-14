@@ -26,9 +26,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
-import com.thedavelopers.eventqr.features.organizer.formatOrganizerEventDate
 import com.thedavelopers.eventqr.features.organizer.tintBlock
-import com.thedavelopers.eventqr.features.organizer.formatOrganizerEventDate
 import com.thedavelopers.eventqr.features.organizer.tintBlockArgb
 import com.thedavelopers.eventqr.core.api.ApiConfig
 import com.thedavelopers.eventqr.core.api.dto.ApiResponse
@@ -42,6 +40,8 @@ import com.thedavelopers.eventqr.features.organizer.OrganizerMvpLoad
 import com.thedavelopers.eventqr.features.organizer.OrganizerRepository
 import com.thedavelopers.eventqr.features.organizer.organizerEventDateLine
 import com.thedavelopers.eventqr.features.organizer.approvedOnly
+import com.thedavelopers.eventqr.features.organizer.pickerDateLabel
+import com.thedavelopers.eventqr.features.organizer.pickerOrdered
 import com.thedavelopers.eventqr.features.organizer.cardRes
 import com.thedavelopers.eventqr.features.organizer.centeredEmptyState
 import com.thedavelopers.eventqr.features.organizer.errorState
@@ -57,6 +57,8 @@ import com.thedavelopers.eventqr.features.organizer.saveSelectedEventId
 import com.thedavelopers.eventqr.features.organizer.selectedEventId
 import com.thedavelopers.eventqr.features.organizer.styledText
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResponse
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.ListRowBinder
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
@@ -121,7 +123,6 @@ open class ManageRewardsActivity : AppCompatActivity() {
         PassHeadBinder.bindCompact(
             root = head,
             title = getString(R.string.manage_rewards_title),
-            eyebrow = getString(R.string.ui_organizer_role),
         )
 
         // Before an event is resolved (e.g. the event list failed to load) a pull retries that load instead.
@@ -202,80 +203,25 @@ open class ManageRewardsActivity : AppCompatActivity() {
     }
 
 
-    /** Date shown under an event name: the backend's date with the time-of-day and zone stripped (never a raw ISO stamp). */
-    private fun eventDateLabel(event: OrganizerMvpEvent): String =
-        formatOrganizerEventDate(
-            event.shortDate.takeIf { it.isNotBlank() && it != "-" }
-                ?: event.dateTime.takeIf { it != "-" }.orEmpty(),
-        )
-
     /**
-     * The event selector is a field row from `activity_manage_rewards.xml`; tapping it opens the
-     * same approved-event popup as before. The popup itself is a hairline surface with rows from
-     * the shared list-row styles, not a gradient card.
+     * The event selector is the shared searchable field (plan 5.2 "Event picker"). It is fed the
+     * approved set in nearest-date order; picking one swaps the screen to that event.
      */
     private fun bindSelector() {
-        val box = findViewById<View>(R.id.mrw_event_selector)
-        val titleText = findViewById<TextView>(R.id.mrw_event_summary_title)
-        val subtitleText = findViewById<TextView>(R.id.mrw_event_summary_count)
-        val approvedEvents = eventOptions.approvedOnly()
-        var selectedIndex = approvedEvents.indexOfFirst { it.id == selectedEvent.id }.coerceAtLeast(0)
-
-        fun render(event: OrganizerMvpEvent) {
-            titleText.text = event.title.ifBlank { getString(R.string.manage_rewards_select_event_title) }
-            val dateLabel = eventDateLabel(event)
-            subtitleText.text = dateLabel
-            subtitleText.visibility = if (dateLabel.isBlank()) View.GONE else View.VISIBLE
+        val picker = findViewById<EventPickerField>(R.id.event_picker_field)
+        picker.setOnEventSelectedListener { id ->
+            eventOptions.firstOrNull { it.id == id }?.let { onEventChosen(it) }
         }
-
-        render(approvedEvents.getOrNull(selectedIndex) ?: selectedEvent)
-
-        var popup: android.widget.PopupWindow? = null
-
-        fun buildDropdown(): LinearLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = androidx.core.content.ContextCompat.getDrawable(this@ManageRewardsActivity, R.drawable.bg_ui_card)
-            setPadding(0, dimenPx(R.dimen.space_4), 0, dimenPx(R.dimen.space_4))
-            approvedEvents.forEachIndexed { index, event ->
-                val isCurrent = index == selectedIndex
-                val row = LayoutInflater.from(this@ManageRewardsActivity)
-                    .inflate(R.layout.list_row_icon, this, false)
-                ListRowBinder.bind(
-                    row = row,
-                    title = event.title.ifBlank { getString(R.string.manage_rewards_untitled_event) },
-                    meta = eventDateLabel(event).ifBlank { null },
-                    trailing = if (isCurrent) ListRowBinder.Trailing.BADGE else ListRowBinder.Trailing.NONE,
-                    trailingText = if (isCurrent) getString(R.string.item_portal_option_current) else null,
-                    badgeStyle = R.style.Widget_EventQR_Ui_StatusBadge_Valid,
-                    showDivider = index < approvedEvents.lastIndex,
-                    onClick = {
-                        selectedIndex = index
-                        render(event)
-                        popup?.dismiss()
-                        onEventChosen(event)
-                    },
+        picker.setOptions(
+            eventOptions.approvedOnly().pickerOrdered().map {
+                EventPickerOption(
+                    id = it.id,
+                    title = it.title.ifBlank { getString(R.string.common_untitled_event) },
+                    meta = it.pickerDateLabel(),
                 )
-                addView(row)
-            }
-        }
-
-        box.setOnClickListener {
-            if (approvedEvents.isEmpty()) return@setOnClickListener
-            popup?.dismiss()
-            // A long event list must scroll inside the popup instead of running off the screen.
-            val maxHeight = (resources.displayMetrics.heightPixels * 0.5f).toInt()
-            popup = android.widget.PopupWindow(
-                android.widget.ScrollView(this@ManageRewardsActivity).apply { addView(buildDropdown()) },
-                box.width.takeIf { it > 0 } ?: ViewGroup.LayoutParams.MATCH_PARENT,
-                if (approvedEvents.size > 6) maxHeight else ViewGroup.LayoutParams.WRAP_CONTENT,
-                true,
-            ).apply {
-                isOutsideTouchable = true
-                elevation = dimenPx(R.dimen.ui_sheet_elevation).toFloat()
-                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
-            }
-            popup.showAsDropDown(box, 0, dimenPx(R.dimen.space_4))
-        }
+            },
+            selectedEvent.id,
+        )
     }
 
     private fun onEventChosen(event: OrganizerMvpEvent) {

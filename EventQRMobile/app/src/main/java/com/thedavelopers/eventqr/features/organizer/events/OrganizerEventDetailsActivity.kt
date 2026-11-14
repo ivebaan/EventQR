@@ -100,7 +100,7 @@ class OrganizerEventDetailsActivity : AppCompatActivity() {
         OrganizerEventHeadBinder.bind(
             root = findViewById(R.id.oeHead),
             title = event.title?.takeIf { it.isNotBlank() }
-                ?: getString(R.string.organizer_untitled_event),
+                ?: getString(R.string.common_untitled_event),
             status = status,
             // The badge is the STATUS row here, not a header ornament; the editor keeps the header.
             showStatus = false,

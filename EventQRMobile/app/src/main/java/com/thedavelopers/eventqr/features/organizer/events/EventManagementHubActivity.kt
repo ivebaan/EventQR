@@ -6,13 +6,9 @@ import android.view.View
 import android.widget.TextView
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
-import com.thedavelopers.eventqr.core.api.dto.EventStatus
 import com.thedavelopers.eventqr.core.util.ScreenInsets
-import com.thedavelopers.eventqr.features.attendee.AttendeeBadges
 import com.thedavelopers.eventqr.features.events.EventStatusBadgeStyler
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpEvent
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpDataSource
@@ -36,10 +32,10 @@ import kotlinx.coroutines.launch
 /**
  * Event management hub (§6.4) - retires Gen C.
  *
- * Identity is a flat `ui_primary` block: the event name in `headline` on the full band, a quiet
- * dot + status line under it (§5.4 on-dark exception), three inline stats in `numeric_m`, then a
- * perforation. Below it one grouped card holds the five management rows with 16dp chevrons. No
- * gradient banner, no 96dp glyph, no per-row hand-rolled card.
+ * Identity is a flat `ui_primary` block: the event name in `headline` on the full band, three
+ * inline stats in `numeric_m`, then a perforation. Below it one grouped card holds the five
+ * management rows with 16dp chevrons. No gradient banner, no 96dp glyph, no per-row hand-rolled
+ * card, no status line under the title.
  */
 open class EventManagementHubActivity : AppCompatActivity() {
     private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
@@ -145,20 +141,19 @@ open class EventManagementHubActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.emh_event_title).text = event.title.ifBlank {
-            getString(R.string.organizer_untitled_event)
+            getString(R.string.common_untitled_event)
         }
         findViewById<TextView>(R.id.emh_stat_registered).text = formatCount(registeredCount)
         findViewById<TextView>(R.id.emh_stat_capacity).text = capacityText
         findViewById<TextView>(R.id.emh_stat_available).text = availableText
 
         // "Upcoming" is a display state derived from the event window; the backend enum has no
-        // UPCOMING. Resolve once so the status line and the routing rule always agree.
+        // UPCOMING. Resolve once so the Edit/View routing rule reads the date-derived status.
         val status = EventStatusBadgeStyler.resolve(
             EventStatusBadgeStyler.fromLabel(event.status),
             event.eventStartAt,
             event.eventEndAt,
         )
-        bindStatusLine(status)
 
         // Editing ends when the event starts or completes. Cancelled and Rejected have no
         // editable content either; the shared rule keys all of it on the date-derived status,
@@ -211,27 +206,6 @@ open class EventManagementHubActivity : AppCompatActivity() {
                 event.title,
             )
         }
-    }
-
-    /**
-     * The quiet status line under the title: one TalkBack node reading "Status: <label>", a 6dp
-     * opaque dot tinted per tone, and the word in `ui_text_on_dark_muted` (never lime text). The
-     * light-surface `bindEventBadge` mapping would paint container fills on the dark band.
-     */
-    private fun bindStatusLine(status: EventStatus) {
-        val label = AttendeeBadges.label(this, status)
-        findViewById<TextView>(R.id.emh_status_text).text = label
-
-        val dot = findViewById<View>(R.id.emh_status_dot)
-        ViewCompat.setBackgroundTintList(
-            dot,
-            ContextCompat.getColorStateList(this, AttendeeBadges.onDarkDotColorRes(status)),
-        )
-
-        val row = findViewById<View>(R.id.emh_status_row)
-        row.visibility = View.VISIBLE
-        row.contentDescription = getString(R.string.ui_organizer_hub_status_a11y, label)
-        ViewCompat.setScreenReaderFocusable(row, true)
     }
 
     private fun bindRow(

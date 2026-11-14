@@ -32,6 +32,8 @@ import com.thedavelopers.eventqr.features.reports.model.dto.EventReportFilterSta
 import com.thedavelopers.eventqr.features.reports.model.dto.EventReportFiltersDto
 import com.thedavelopers.eventqr.features.reports.model.dto.EventReportSummaryDto
 import com.thedavelopers.eventqr.features.reports.model.dto.EventReportType
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.ListRowBinder
 import com.thedavelopers.eventqr.ui.components.asButtonRole
 import kotlinx.coroutines.Job
@@ -68,6 +70,7 @@ open class EventReportsActivity : AppCompatActivity() {
     private var generateJob: Job? = null
     private var summaryJob: Job? = null
     private var summaryErrorStrip: View? = null
+    private var eventPicker: EventPickerField? = null
     private var summaryErrorText: TextView? = null
     private val dateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.ENGLISH)
 
@@ -79,6 +82,8 @@ open class EventReportsActivity : AppCompatActivity() {
         content = organizerShell(
             title = getString(R.string.event_reports_screen_title),
             selectedNav = NAV_REPORTS,
+            // Blank subtitle: no ORGANIZER eyebrow on this page (bindCompact hides a blank one).
+            subtitle = "",
         )
 
         requestedEventId = intentEventId() ?: selectedEventId().takeIf { it.isNotBlank() }
@@ -170,15 +175,33 @@ open class EventReportsActivity : AppCompatActivity() {
         // The selector reuses the list already loaded by onEventsLoaded; a second fetch could fail on its own
         // and leave the selector empty while the rest of the screen works.
         skeletonLoading?.visibility = View.GONE
+        // The picker lives in the tree this method clears: close its list first, or the popup outlives its anchor.
+        eventPicker?.dismissPopup()
         container.removeAllViews()
-        // 56dp field row, not a glassy card wrapping a hidden spinner.
-        container.addView(
-            eventSelector(loadedEvents, selectedEvent.id) { event ->
+        val picker = EventPickerField(this).apply {
+            setOptions(
+                loadedEvents.approvedOnly().pickerOrdered().map {
+                    EventPickerOption(
+                        id = it.id,
+                        title = it.title.ifBlank { getString(R.string.common_untitled_event) },
+                        meta = it.pickerDateLabel(),
+                    )
+                },
+                selectedEvent.id,
+            )
+            setOnEventSelectedListener { id ->
+                val event = loadedEvents.firstOrNull { it.id == id } ?: return@setOnEventSelectedListener
+                if (event.id == selectedEvent.id) return@setOnEventSelectedListener
                 selectedEvent = event
                 repository.saveSelectedEventId(event.id)
                 saveSelectedEventId(event.id)
                 loadScreen()
-            },
+            }
+        }
+        eventPicker = picker
+        container.addView(
+            picker,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
         container.addView(buildSummaryErrorStrip())
         container.addView(buildSummaryMetrics())
@@ -247,7 +270,8 @@ open class EventReportsActivity : AppCompatActivity() {
 
         val action = TextView(this@EventReportsActivity, null, 0, R.style.Widget_EventQR_Ui_SectionAction).apply {
             id = R.id.eventReportsGenerateAll
-            text = getString(R.string.event_reports_generate_all)
+            // getText, not getString: the label's <u> markup is the link affordance (§5.1).
+            text = getText(R.string.event_reports_generate_all)
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -530,7 +554,8 @@ open class EventReportsActivity : AppCompatActivity() {
     private fun resetGenerateAction() {
         generateAllAction?.apply {
             isEnabled = true
-            text = getString(R.string.event_reports_generate_all)
+            // getText, not getString: restores the underlined link label, span included.
+            text = getText(R.string.event_reports_generate_all)
         }
     }
 

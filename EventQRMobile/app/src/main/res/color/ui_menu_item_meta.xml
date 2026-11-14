@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Event picker row meta line (plan 5.2 "Event picker", 9.1). On the chosen row the meta sits on
+     ui_primary_container, where ui_text_secondary measures 5.07:1; it still takes
+     ui_on_primary_container (12.46:1) so the whole chosen row reads one ink. Selected is included
+     for a ListView that reports keyboard selection. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true" android:color="@color/ui_on_primary_container" />
+    <item android:state_selected="true" android:color="@color/ui_on_primary_container" />
+    <item android:color="@color/ui_text_secondary" />
+</selector>

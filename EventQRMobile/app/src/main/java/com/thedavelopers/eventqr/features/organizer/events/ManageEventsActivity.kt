@@ -87,7 +87,6 @@ open class ManageEventsActivity : AppCompatActivity() {
         PassHeadBinder.bindCompact(
             root = passHead,
             title = getString(R.string.ui_organizer_events),
-            eyebrow = getString(R.string.ui_organizer_role),
         )
 
         adapter = OrganizerEventAdapter { event ->

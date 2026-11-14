@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Event picker row (plan 5.2 "Event picker"). Title wraps, meta follows; no divider, no chevron.
+     The popup owns the rounded surface, so the row background is a square state list. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_ui_menu_option"
+    android:minHeight="@dimen/ui_touch_min"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/space_lg"
+    android:paddingTop="@dimen/space_12"
+    android:paddingEnd="@dimen/space_lg"
+    android:paddingBottom="@dimen/space_12">
+
+    <TextView
+        android:id="@+id/eventPickerRowTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
+        android:textColor="@color/ui_menu_option_text" />
+
+    <TextView
+        android:id="@+id/eventPickerRowMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_xs"
+        android:importantForAccessibility="no"
+        android:textAppearance="@style/TextAppearance.EventQR.Type.Micro"
+        android:textColor="@color/ui_menu_item_meta"
+        android:visibility="gone" />
+
+</LinearLayout>

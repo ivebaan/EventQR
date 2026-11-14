@@ -58,9 +58,17 @@ internal object DiscardChangesDialog {
         stackActionsAbove(context, view.findViewById(R.id.dialogActions), commit)
         // The window title is what TalkBack reads as the dialog opens; the body follows the title
         // in the reading order. Focus lands on the safe action, so a stray Enter never discards.
-        // `Dialog.setTitle`, not `window.setTitle`: it also publishes the title as the window's
-        // manager attribute, which is the value the accessibility layer and a test can read back.
-        dialog.setTitle(context.getString(title))
+        // `window.setTitle` + the manager attribute, never `AlertDialog.setTitle`: the latter also
+        // routes through `AlertController`, which draws its own title panel - a second visible
+        // "Discard changes?" above the `dialog_base` heading. `dialogTitle` stays the only
+        // painted title; the window title is the accessibility / test-facing copy.
+        dialog.window?.let { window ->
+            val label = context.getString(title)
+            window.setTitle(label)
+            // `getAttributes()` hands back a copy, so the title must be written into a fresh
+            // attributes object and assigned, or the manager never sees it.
+            window.attributes = window.attributes.apply { this.title = label }
+        }
         dialog.setOnShowListener { view.findViewById<Button>(R.id.dialogNegative).requestFocus() }
 
         return dialog

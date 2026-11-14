@@ -4,4 +4,6 @@
     <integer name="motion_pulse_ms">280</integer>
     <integer name="motion_restore_ms">400</integer>
     <integer name="motion_settle_ms">80</integer>
+    <!-- Typing-quiet window before the picker announces the result count (plan 5.2). -->
+    <integer name="motion_announce_ms">500</integer>
 </resources>

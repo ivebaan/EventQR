@@ -7,13 +7,16 @@ import com.thedavelopers.eventqr.core.api.safeApiCall
 import com.thedavelopers.eventqr.features.idprinting.model.dto.IdTemplateConfigRequest
 import com.thedavelopers.eventqr.features.idprinting.model.dto.IdTemplateConfigResponse
 
-class IdTemplateConfigRepository(context: Context) {
+/**
+ * The ID template endpoint. `open` so a test can hand the screen a fixed config without a network.
+ */
+open class IdTemplateConfigRepository(context: Context) {
     private val apiService = ApiClient.getService(context)
 
-    suspend fun fetchConfig(eventId: String): NetworkResult<IdTemplateConfigResponse> =
+    open suspend fun fetchConfig(eventId: String): NetworkResult<IdTemplateConfigResponse> =
         safeApiCall { apiService.getIdTemplateConfig(eventId) }
 
-    suspend fun saveConfig(
+    open suspend fun saveConfig(
         eventId: String,
         visibleFields: List<String>,
     ): NetworkResult<IdTemplateConfigResponse> =

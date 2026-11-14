@@ -20,9 +20,6 @@
     <!-- EventManagementHubActivity (emh_) -->
     <item name="emh_header_banner" type="id" />
     <item name="emh_header_identity" type="id" />
-    <item name="emh_status_row" type="id" />
-    <item name="emh_status_dot" type="id" />
-    <item name="emh_status_text" type="id" />
     <item name="emh_event_title" type="id" />
     <item name="emh_stats_row" type="id" />
     <item name="emh_stat_registered" type="id" />
@@ -58,9 +55,6 @@
     <item name="eed_save_button" type="id" />
 
     <!-- ManageRewardsActivity (mrw_) -->
-    <item name="mrw_event_selector" type="id" />
-    <item name="mrw_event_summary_title" type="id" />
-    <item name="mrw_event_summary_count" type="id" />
     <item name="mrw_rewards_label" type="id" />
     <item name="mrw_rewards_desc" type="id" />
     <item name="mrw_rewards_switch" type="id" />
@@ -102,4 +96,7 @@
 
     <!-- TransactionLogsActivity (tlg_) -->
     <item name="tlg_list" type="id" />
+
+    <!-- EventPickerField (plan 5.2 "Event picker") -->
+    <item name="event_picker_field" type="id" />
 </resources>
