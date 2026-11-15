@@ -3,6 +3,7 @@ package com.thedavelopers.eventqr.features.dashboard
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.util.UiStrings
 import com.thedavelopers.eventqr.core.api.NetworkResult
+import com.thedavelopers.eventqr.core.api.dto.RedemptionStatus
 import com.thedavelopers.eventqr.core.api.dto.RegistrationStatus
 import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.features.attendee.AttendeeRepository
@@ -16,7 +17,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -37,6 +42,31 @@ class DashboardPresenter(
     fun detach() {
         dashboardJob?.cancel()
         view = null
+    }
+
+    /**
+     * Rewards the attendee has claimed, over the events they were checked in at (a reward can only
+     * be claimed after check-in). Null = unknown: any failed call keeps the cell on `--`.
+     */
+    private suspend fun claimedRewardsCount(
+        registrations: List<com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationResponse>,
+    ): Long? = coroutineScope {
+        val eventIds = registrations
+            .filter { it.status != RegistrationStatus.CANCELLED && (it.attendedAt != null || it.enteredAt != null) }
+            .map { it.eventId.toString() }
+            .distinct()
+        if (eventIds.isEmpty()) return@coroutineScope 0L
+        val gate = Semaphore(4)
+        val results = eventIds
+            .map { id -> async { gate.withPermit { attendeeRepository.getMyRewardRedemptions(id) } } }
+            .awaitAll()
+        if (results.any { it !is NetworkResult.Success }) {
+            null
+        } else {
+            results.sumOf { result ->
+                (result as NetworkResult.Success).data.count { it.status == RedemptionStatus.REDEEMED }.toLong()
+            }
+        }
     }
 
     fun loadDashboard() {
@@ -73,6 +103,14 @@ class DashboardPresenter(
             val summaryResult = summaryDeferred.await()
             val eventsResult = eventsDeferred.await()
             val registrationsResult = registrationsDeferred.await()
+
+            // The "Rewards claimed" cell needs one redemptions call per attended event, so it is
+            // resolved before the spinner drops and the summary renders in one pass.
+            val rewardsClaimedCount: Long? = if (registrationsResult is NetworkResult.Success) {
+                claimedRewardsCount(registrationsResult.data)
+            } else {
+                null
+            }
 
             view?.showLoading(false)
 
@@ -195,6 +233,7 @@ class DashboardPresenter(
                 null
             }
             val registeredCount: Long? = attendeeCounts?.registered?.toLong()
+            val upcomingCount: Long? = attendeeCounts?.upcoming?.toLong()
             val checkInsCount: Long? = attendeeCounts?.checkIns?.toLong()
             val lifetimeRegistrationsCount: Long? = attendeeCounts?.events?.toLong()
 
@@ -207,6 +246,8 @@ class DashboardPresenter(
                     completedEventsCount = completedCount,
                     checkInsCount = checkInsCount,
                     lifetimeRegistrationsCount = lifetimeRegistrationsCount,
+                    upcomingCount = upcomingCount,
+                    rewardsClaimedCount = rewardsClaimedCount,
                     upcomingEvents = nextEventList,
                     discoverEvents = discoverEvents,
                 )
@@ -220,6 +261,8 @@ class DashboardPresenter(
                     completedEventsCount = completedCount,
                     checkInsCount = checkInsCount,
                     lifetimeRegistrationsCount = lifetimeRegistrationsCount,
+                    upcomingCount = upcomingCount,
+                    rewardsClaimedCount = rewardsClaimedCount,
                     totalNotifications = 0L,
                     fullName = sessionManager.getFullName(),
                     upcomingEvents = nextEventList,
@@ -262,7 +305,7 @@ class DashboardPresenter(
 
 data class RegistrationCounts(val registered: Int, val completed: Int)
 
-data class AttendeeCounts(val registered: Int, val checkIns: Int, val events: Int)
+data class AttendeeCounts(val registered: Int, val checkIns: Int, val events: Int, val upcoming: Int = 0)
 
 /** Pure dashboard tile math, kept free of Android types so it can be unit tested. */
 object DashboardStats {
@@ -295,6 +338,7 @@ object DashboardStats {
             it.status != RegistrationStatus.CANCELLED && (it.attendedAt != null || it.enteredAt != null)
         },
         events = registrations.count { it.status != RegistrationStatus.CANCELLED },
+        upcoming = registrations.count { isLive(it.status) && it.eventStartAt?.isAfter(now) == true },
     )
 
     /**
@@ -306,13 +350,13 @@ object DashboardStats {
      */
     fun passHeadStats(
         summary: DashboardSummary?,
-        registeredLabel: String,
-        checkInsLabel: String,
-        eventsLabel: String,
+        upcomingLabel: String,
+        attendedLabel: String,
+        rewardsLabel: String,
         format: (Long?) -> String,
     ): List<PassStat> = listOf(
-        PassStat(format(summary?.totalRegistrations), registeredLabel),
-        PassStat(format(summary?.checkInsCount), checkInsLabel),
-        PassStat(format(summary?.lifetimeRegistrationsCount), eventsLabel),
+        PassStat(format(summary?.upcomingCount), upcomingLabel),
+        PassStat(format(summary?.checkInsCount), attendedLabel),
+        PassStat(format(summary?.rewardsClaimedCount), rewardsLabel),
     )
 }

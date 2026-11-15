@@ -45,9 +45,9 @@ class OrganizerLabelsTest {
         val all = texts(activity.window.decorView).toString()
         // §6.4: the stub is REGISTERED / ATTENDED / LIVE NOW; the pass head has no subtitle.
         // Before the first load every cell is the unavailable token, never a fake 0.
-        assertTrue(all, all.contains("Registered"))
-        assertTrue(all, all.contains("Attended"))
-        assertTrue(all, all.contains("Live now"))
+        assertTrue(all, all.contains("Attendance"))
+        assertTrue(all, all.contains("Booked ahead"))
+        assertTrue(all, all.contains("Attended now"))
         assertTrue(all, all.contains("--"))
         assertTrue(all, all.contains("No events yet"))
         assertTrue(all, all.contains("All events"))

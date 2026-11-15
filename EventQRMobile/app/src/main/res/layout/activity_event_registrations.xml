@@ -108,8 +108,10 @@
                         android:minHeight="@dimen/ui_metric_row_height"
                         android:layout_marginTop="@dimen/space_16"
                         android:background="@drawable/bg_ui_card"
+                        android:divider="@drawable/divider_ui_hairline_vertical"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:showDividers="middle">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -138,12 +140,6 @@
                                 android:textAppearance="@style/TextAppearance.EventQR.Type.Overline" />
                         </LinearLayout>
 
-                        <View
-                            android:layout_width="@dimen/stroke_hairline"
-                            android:layout_height="match_parent"
-                            android:background="@color/ui_hairline"
-                            android:importantForAccessibility="no" />
-
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
@@ -170,12 +166,6 @@
                                 android:text="@string/ui_staff_checked_in"
                                 android:textAppearance="@style/TextAppearance.EventQR.Type.Overline" />
                         </LinearLayout>
-
-                        <View
-                            android:layout_width="@dimen/stroke_hairline"
-                            android:layout_height="match_parent"
-                            android:background="@color/ui_hairline"
-                            android:importantForAccessibility="no" />
 
                         <LinearLayout
                             android:layout_width="0dp"

@@ -1348,6 +1348,30 @@ class ComponentInflationTest {
      * print the same three numbers and the hub stays the place that owns them (§6.4 v1.20).
      */
     @Test
+    fun statsStrips_neverStretchToTheScreen() {
+        val context = themedContext()
+        val density = context.resources.displayMetrics.density
+        val width = (360 * density).toInt()
+        val height = (800 * density).toInt()
+        listOf(
+            R.layout.activity_event_management_hub to R.id.emh_stats_row,
+            R.layout.include_pass_head to R.id.passHeadStub,
+        ).forEach { (layout, id) ->
+            val root = inflate(layout, LinearLayout(context))
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            root.layout(0, 0, width, height)
+            val strip = root.findViewById<View>(id)
+            assertTrue(
+                "${context.resources.getResourceEntryName(id)} was ${strip.height}px of ${height}px",
+                strip.height < height / 4,
+            )
+        }
+    }
+
+    @Test
     fun manageEvent_stillCarriesTheStatsBandThatDetailsDropped() {
         val context = themedContext()
 

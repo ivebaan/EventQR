@@ -20,6 +20,12 @@ data class OrganizerDashboardNumbers(
     val upcoming: Long? = null,
     val ended: Long? = null,
     val redeemed: Long? = null,
+    /** Attended / registered over ENDED events only, in whole percent; null when unknown or nothing has ended with registrations. */
+    val attendancePercent: Long? = null,
+    /** Sign-ups across events that have not started yet. */
+    val registeredUpcoming: Long? = null,
+    /** Attended so far across events that are live right now. */
+    val attendedNow: Long? = null,
 ) {
     companion object {
         /**
@@ -32,7 +38,18 @@ data class OrganizerDashboardNumbers(
             now: Instant = Instant.now(),
         ): OrganizerDashboardNumbers {
             val lifecycles = events?.map { lifecycleAt(it, now) }
+            fun sumFor(life: Lifecycle, pick: (OrganizerMvpEvent) -> Long): Long? =
+                events?.filterIndexed { i, _ -> lifecycles!![i] == life }?.sumOf(pick)
+            val endedRegistered = sumFor(Lifecycle.ENDED) { it.registeredCount }
+            val endedAttended = sumFor(Lifecycle.ENDED) { it.attendedCount }
             return OrganizerDashboardNumbers(
+                attendancePercent = if (endedRegistered != null && endedAttended != null && endedRegistered > 0) {
+                    (endedAttended * 100 / endedRegistered).coerceIn(0L, 100L)
+                } else {
+                    null
+                },
+                registeredUpcoming = sumFor(Lifecycle.UPCOMING) { it.registeredCount },
+                attendedNow = sumFor(Lifecycle.LIVE) { it.attendedCount },
                 registered = events?.sumOf { it.registeredCount },
                 attended = events?.sumOf { it.attendedCount },
                 liveNow = lifecycles?.count { it == Lifecycle.LIVE }?.toLong(),

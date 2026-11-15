@@ -86,9 +86,9 @@ class OrganizerDashboardRenderTest {
 
         assertEquals(
             listOf(
-                "Registered" to "200",
-                "Attended" to "90",
-                "Live now" to "1",
+                "Attendance" to "20%",
+                "Booked ahead" to "30",
+                "Attended now" to "80",
             ),
             activity.headCells(),
         )
@@ -117,9 +117,9 @@ class OrganizerDashboardRenderTest {
 
         assertEquals(
             listOf(
-                "Registered" to "120",
-                "Attended" to "80",
-                "Live now" to "1",
+                "Attendance" to "--",
+                "Booked ahead" to "0",
+                "Attended now" to "80",
             ),
             activity.headCells(),
         )
@@ -149,7 +149,8 @@ class OrganizerDashboardRenderTest {
 
         activity.renderDashboard(success(emptyList()))
 
-        assertEquals(List(3) { "0" }, activity.headCells().map { it.second })
+        // Attendance is "--" until an event with registrations has ended; the counts are real zeros.
+        assertEquals(listOf("--", "0", "0"), activity.headCells().map { it.second })
         assertEquals(List(3) { "0" }, activity.metricCells().map { it.second })
     }
 

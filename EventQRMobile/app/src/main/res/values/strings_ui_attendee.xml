@@ -16,6 +16,9 @@
     <string name="ui_attendee_points">Points</string>
     <string name="ui_attendee_events">Events</string>
     <string name="ui_attendee_check_ins">Check-ins</string>
+    <string name="ui_attendee_stat_upcoming">Upcoming</string>
+    <string name="ui_attendee_stat_attended">Attended</string>
+    <string name="ui_attendee_stat_rewards_claimed">Rewards</string>
     <string name="ui_attendee_balance">Balance</string>
     <string name="ui_attendee_registration">Registration</string>
     <!-- Fallback label when the server sends no availability message. -->

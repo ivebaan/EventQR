@@ -18,6 +18,10 @@ data class DashboardSummary(
     val checkInsCount: Long? = null,
     /** Lifetime non-cancelled registrations (ended and no-show included); null = unknown. */
     val lifetimeRegistrationsCount: Long? = null,
+    /** Live registrations whose event has not started yet; null = unknown. */
+    val upcomingCount: Long? = null,
+    /** Rewards the attendee has claimed across checked-in events; null = unknown. */
+    val rewardsClaimedCount: Long? = null,
     val totalNotifications: Long,
     val fullName: String? = null,
     val upcomingEvents: List<DashboardUpcomingEvent>? = emptyList(),

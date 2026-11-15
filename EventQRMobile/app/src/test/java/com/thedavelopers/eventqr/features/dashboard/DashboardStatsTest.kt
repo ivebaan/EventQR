@@ -128,9 +128,9 @@ class DashboardStatsTest {
         assertEquals(2, counts.checkIns)
     }
 
-    /** The stub order is registered / check-ins / events; points no longer reaches a cell. */
+    /** The head order is upcoming / attended / rewards claimed; points never reach a cell. */
     @Test
-    fun passHeadStats_orderIsRegisteredCheckInsEvents() {
+    fun passHeadStats_orderIsUpcomingAttendedRewardsClaimed() {
         val summary = DashboardSummary(
             totalEvents = 28,
             totalRegistrations = 2,
@@ -139,21 +139,34 @@ class DashboardStatsTest {
             completedEventsCount = 1,
             checkInsCount = 4,
             lifetimeRegistrationsCount = 7,
+            upcomingCount = 2,
+            rewardsClaimedCount = 3,
             totalNotifications = 0,
         )
         val stats = DashboardStats.passHeadStats(
-            summary, "Registered", "Check-ins", "Events",
+            summary, "Upcoming", "Attended", "Rewards claimed",
         ) { it?.toString() ?: "--" }
-        assertEquals(listOf("2", "4", "7"), stats.map { it.value })
-        assertEquals(listOf("Registered", "Check-ins", "Events"), stats.map { it.label })
+        assertEquals(listOf("2", "4", "3"), stats.map { it.value })
+        assertEquals(listOf("Upcoming", "Attended", "Rewards claimed"), stats.map { it.label })
         assertFalse(stats.any { it.value == "120" })
     }
 
+    /** Upcoming = live registrations whose event has not started; ongoing and ended ones are not. */
+    @Test
+    fun attendeeCounts_upcomingCountsOnlyNotYetStartedLiveRegistrations() {
+        val regs = listOf(
+            reg(RegistrationStatus.REGISTERED, now.plusSeconds(3_600), now.plusSeconds(7_200)),
+            reg(RegistrationStatus.REGISTERED, now.minusSeconds(60), now.plusSeconds(3_600)),
+            reg(RegistrationStatus.REGISTERED, now.minusSeconds(7_200), now.minusSeconds(3_600)),
+            reg(RegistrationStatus.CANCELLED, now.plusSeconds(3_600), now.plusSeconds(7_200)),
+        )
+        assertEquals(1, DashboardStats.attendeeCounts(regs, now).upcoming)
+    }
     /** A failed load keeps every cell unknown, so the stub renders "--" and never a fake 0. */
     @Test
     fun passHeadStats_failedLoadLeavesEveryCellUnknown() {
         val received = mutableListOf<Long?>()
-        val stats = DashboardStats.passHeadStats(null, "Registered", "Check-ins", "Events") {
+        val stats = DashboardStats.passHeadStats(null, "Upcoming", "Attended", "Rewards claimed") {
             received += it
             it?.toString() ?: "--"
         }

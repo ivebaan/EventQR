@@ -242,9 +242,9 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         val roleNames = portals.map { PortalSwitcher.shortRoleName(this, it) }
         val stats = DashboardStats.passHeadStats(
             summary = summary,
-            registeredLabel = getString(R.string.ui_attendee_registered),
-            checkInsLabel = getString(R.string.ui_attendee_check_ins),
-            eventsLabel = getString(R.string.ui_attendee_events),
+            upcomingLabel = getString(R.string.ui_attendee_stat_upcoming),
+            attendedLabel = getString(R.string.ui_attendee_stat_attended),
+            rewardsLabel = getString(R.string.ui_attendee_stat_rewards_claimed),
             format = { formatCount(it) },
         )
 

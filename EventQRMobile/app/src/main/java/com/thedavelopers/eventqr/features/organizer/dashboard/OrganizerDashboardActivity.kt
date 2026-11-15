@@ -158,9 +158,9 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
                 selectedTabIndex = portals.indexOf(PortalSwitcher.PORTAL_ORGANIZER).coerceAtLeast(0),
                 bellCount = headBell,
                 stats = listOf(
-                    PassStat(numberText(numbers.registered), getString(R.string.ui_organizer_registrations)),
-                    PassStat(numberText(numbers.attended), getString(R.string.ui_organizer_attended)),
-                    PassStat(numberText(numbers.liveNow), getString(R.string.ui_organizer_live_now)),
+                    PassStat(percentText(numbers.attendancePercent), getString(R.string.ui_organizer_attendance_rate)),
+                    PassStat(numberText(numbers.registeredUpcoming), getString(R.string.ui_organizer_upcoming_signups)),
+                    PassStat(numberText(numbers.attendedNow), getString(R.string.ui_organizer_attended_now)),
                 ),
                 onTabSelected = { index -> portals.getOrNull(index)?.let(::switchToPortal) },
                 onBellClick = {
@@ -334,6 +334,11 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
 
     private fun formatCount(value: Long): String =
         NumberFormat.getIntegerInstance(Locale.getDefault()).format(value)
+
+    /** Attendance rate: `--` until an event with registrations has ended. */
+    private fun percentText(value: Long?): String =
+        value?.let { getString(R.string.ui_organizer_percent_value, it) }
+            ?: getString(R.string.ui_organizer_value_unavailable)
 
     /** Unknown prints the pass head's `--`; a known zero prints `0` (§6.4). */
     private fun numberText(value: Long?): String =
