@@ -6,7 +6,7 @@ import com.thedavelopers.eventqr.core.util.DateFormatters
 import java.time.Instant
 
 /**
- * The `EVENT TIME` value (§6.2, §6.4), one row, one string, shared by the attendee event detail and
+ * The `SCHEDULE` value (§6.2, §6.4), one row, one string, shared by the attendee event detail and
  * the organizer event details so the two screens can never print the same range differently.
  *
  *  * same calendar day: the date prints once, `13 Nov 2026, 12:20 AM – 12:20 PM`
@@ -36,7 +36,7 @@ internal fun formatEventTime(context: Context, start: Instant?, end: Instant?): 
 }
 
 /**
- * The `REGISTRATION WINDOW` value (§6.2, §6.4): both ends as full datetimes, year and clock
+ * The `REGISTRATION` value (§6.2, §6.4): both ends as full datetimes, year and clock
  * included, joined by `event_detail_date_range` (start on line 1, `– end` on line 2). One end alone
  * prints on its own; neither end
  * returns null, so the caller hides the row and its hairline. Shared by the attendee event detail

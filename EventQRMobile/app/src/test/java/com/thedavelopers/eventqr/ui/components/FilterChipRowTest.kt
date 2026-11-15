@@ -95,7 +95,8 @@ class FilterChipRowTest {
      */
     private val nonFilterChipFlows = mapOf(
         "view_chip_flow" to "the code-built chip-row host that chipFlow() inflates",
-        "activity_user_dashboard" to "the attendee quick-action strip: Chip.Action + flow_wrapMode=aligned",
+        "activity_user_dashboard" to
+            "the attendee QUICK ACTIONS strip: Chip.Action + flow_wrapMode=aligned, it navigates",
     )
 
     /** Every layout in `res/layout` that declares a Flow, read from source so a new one is named. */

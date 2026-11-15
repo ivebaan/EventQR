@@ -1,7 +1,9 @@
 package com.thedavelopers.eventqr.features.auth.register
 
 import android.text.method.PasswordTransformationMethod
+import android.os.Looper
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -498,5 +500,86 @@ class RegistrationActivityTest {
         val after = AuthStripTestKit.rotate(AuthStripTestKit.visibleController(RegistrationActivity::class.java))
 
         assertEquals(View.GONE, strip(after).visibility)
+    }
+
+    // ---- IME Next order: first, last, email, phone, password, confirm password
+
+    /** The screen's visual top-to-bottom order; every field but the last must forward into the next. */
+    private val imeOrder = listOf(
+        R.id.edtFirstName,
+        R.id.edtLastName,
+        R.id.edtEmail,
+        R.id.edtPhoneNumber,
+        R.id.edtPassword,
+        R.id.edtConfirmPassword,
+    )
+
+    /** Attached and laid out: focus only moves inside a real window. */
+    private fun attached(): RegistrationActivity =
+        Robolectric.buildActivity(RegistrationActivity::class.java).setup().get()
+
+    private fun nameOf(activity: RegistrationActivity, id: Int): String =
+        activity.resources.getResourceEntryName(id)
+
+    @Test
+    fun everyFieldButTheLast_asksTheImeForNext_andTheLastAsksDone() {
+        val activity = attached()
+
+        for (id in imeOrder.dropLast(1)) {
+            val field = activity.findViewById<EditText>(id)
+            assertEquals(
+                "${nameOf(activity, id)} asks the IME for Next",
+                EditorInfo.IME_ACTION_NEXT,
+                field.imeOptions and EditorInfo.IME_MASK_ACTION,
+            )
+        }
+        assertEquals(
+            "confirm password ends the form",
+            EditorInfo.IME_ACTION_DONE,
+            activity.findViewById<EditText>(R.id.edtConfirmPassword).imeOptions and EditorInfo.IME_MASK_ACTION,
+        )
+    }
+
+    @Test
+    fun theForwardChain_followsTheVisualOrder_withNoSkipsAndNoDeadEnds() {
+        val activity = attached()
+
+        for ((current, next) in imeOrder.zipWithNext()) {
+            assertEquals(
+                "${nameOf(activity, current)} forwards to ${nameOf(activity, next)}",
+                next,
+                activity.findViewById<View>(current).nextFocusForwardId,
+            )
+        }
+        assertEquals(
+            "the last field ends the chain",
+            View.NO_ID,
+            activity.findViewById<View>(imeOrder.last()).nextFocusForwardId,
+        )
+    }
+
+    /** The reported bug: Enter on first name landed on email, skipping last name. */
+    @Test
+    fun pressingNextOnEachField_movesFocusToTheNextFieldInVisualOrder() {
+        val activity = attached()
+
+        for ((current, next) in imeOrder.zipWithNext()) {
+            val field = activity.findViewById<EditText>(current)
+            val target = activity.findViewById<EditText>(next)
+            assertTrue("${nameOf(activity, current)} takes focus", field.requestFocus())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue("${nameOf(activity, current)} holds focus", field.hasFocus())
+
+            field.onEditorAction(EditorInfo.IME_ACTION_NEXT)
+            shadowOf(Looper.getMainLooper()).idle()
+
+            // The window itself never takes focus under Robolectric, so activity.currentFocus is
+            // null here; the field's own focus flag is the honest assertion.
+            assertTrue(
+                "Next on ${nameOf(activity, current)} moves focus to ${nameOf(activity, next)}",
+                target.hasFocus(),
+            )
+            assertFalse("${nameOf(activity, current)} gives focus up", field.hasFocus())
+        }
     }
 }

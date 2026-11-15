@@ -16,8 +16,9 @@
 
     Structure kept because DashboardActivity binds it: layoutUpcomingEvents and
     layoutDiscoverEvents each hold their eyebrow at index 0 so replaceRows() can swap every child
-    after it, skeletonLoading is the one loading block, and the two navigation targets keep their
-    ids (btnTransactionHistory, btnRequestEventCard).
+    after it, skeletonLoading is the one loading block, and the quick-action strip keeps the chip
+    ids the strip binds (btnMyPasses, btnTransactionHistory, btnRequestEventCard) under the
+    `attendeeQuickActions` container the Home test reads.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -156,12 +157,14 @@
 
                 <!-- ═════════ QUICK ACTIONS: eyebrow + equal-width chips filling the gutter ═════════ -->
                 <LinearLayout
+                    android:id="@+id/attendeeQuickActions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/space_32"
                     android:orientation="vertical">
 
                     <TextView
+                        android:id="@+id/eyebrowQuickActions"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="@dimen/ui_gutter"

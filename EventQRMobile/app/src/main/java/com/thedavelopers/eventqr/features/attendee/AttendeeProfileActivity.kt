@@ -8,7 +8,6 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.thedavelopers.eventqr.BuildConfig
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
@@ -33,8 +32,12 @@ import kotlinx.coroutines.launch
  * status-bar inset, the same wiring as the attendee Rewards screen and the admin Accounts /
  * Requests screens. Everything below the tear scrolls, identity block included. The identity is
  * one TalkBack node (its name is the heading) and the two sections are `list_row_icon` rows bound
- * through [ListRowBinder]: ACCOUNT first with Edit profile alone, then ACTIVITY. Every role
- * reaches this screen, so it holds no portal switch - the dashboard role tabs do that.
+ * through [ListRowBinder]: ACCOUNT first with Edit profile alone, then ACTIVITY (My passes,
+ * Transaction history, Claimed rewards, My event requests) and the Sign out block. My passes opens
+ * the registered-events screen through [attendeeQuickActionDestination], the mapping the dashboard's
+ * own chip uses - the page carries no quick-action strip of its own. There is no version footer
+ * (v1.52). Every role reaches this screen, so it holds no portal switch - the dashboard role tabs do
+ * that.
  *
  * Transaction history shows no points balance: `PointBalanceResponse` is per (event, attendee) - the
  * Rewards screen reads it for the event it has selected - and there is no account-wide balance
@@ -88,12 +91,6 @@ class AttendeeProfileActivity : AppCompatActivity() {
         txtProfileError = findViewById(R.id.txtProfileError)
         btnProfileRetry = findViewById(R.id.btnProfileRetry)
 
-        findViewById<TextView>(R.id.txtProfileVersion).text = getString(
-            R.string.ui_attendee_version,
-            BuildConfig.VERSION_NAME,
-            BuildConfig.VERSION_CODE,
-        )
-
         swipeRefresh.setOnRefreshListener { loadProfile() }
 
         btnProfileRetry.setOnClickListener { loadProfile() }
@@ -126,6 +123,21 @@ class AttendeeProfileActivity : AppCompatActivity() {
     }
 
     private fun bindActivityRows() {
+        // My passes leads: it is the top-of-mind action and the dashboard's first chip. The
+        // destination is the dashboard chip's own mapping entry, so the row and the chip cannot
+        // drift apart.
+        bindRow(
+            R.id.rowMyPasses,
+            title = getString(R.string.ui_attendee_my_passes),
+            meta = getString(R.string.ui_attendee_profile_meta_passes),
+            icon = AppIcons.Pass,
+        ) {
+            val destination = requireNotNull(attendeeQuickActionDestination(R.id.btnMyPasses)) {
+                "My passes has no destination"
+            }
+            startActivity(Intent(this, destination))
+        }
+
         bindRow(
             R.id.rowTransactionHistory,
             title = getString(R.string.ui_attendee_transaction_history),

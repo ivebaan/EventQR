@@ -43,13 +43,13 @@ open class AdminRepository(private val context: Context) {
 
     suspend fun loadAdminStats(): NetworkResult<AdminStatsResponse> = safeApiCall { apiService.getAdminStats() }
 
-    suspend fun disableUser(userId: String): NetworkResult<UserResponse> =
+    open suspend fun disableUser(userId: String): NetworkResult<UserResponse> =
         safeApiCall { apiService.disableUser(userId) }
 
-    suspend fun enableUser(userId: String): NetworkResult<UserResponse> =
+    open suspend fun enableUser(userId: String): NetworkResult<UserResponse> =
         safeApiCall { apiService.enableUser(userId) }
 
-    suspend fun deleteUser(userId: String): NetworkResult<Unit> =
+    open suspend fun deleteUser(userId: String): NetworkResult<Unit> =
         safeApiCall { apiService.deleteUser(userId) }
 
     open suspend fun createAdminAccount(

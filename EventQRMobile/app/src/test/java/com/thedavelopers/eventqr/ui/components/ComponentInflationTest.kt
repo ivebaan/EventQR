@@ -1858,8 +1858,8 @@ class ComponentInflationTest {
         val activityRows = root.findViewById<ViewGroup>(R.id.cardActivityMenu).getChildAt(0) as ViewGroup
         val accountRows = root.findViewById<ViewGroup>(R.id.cardAccountMenu).getChildAt(0) as ViewGroup
         assertEquals(
-            "ACTIVITY is one card of three rows",
-            listOf(R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
+            "ACTIVITY is one card of four rows, My passes first",
+            listOf(R.id.rowMyPasses, R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
             (0 until activityRows.childCount).map { activityRows.getChildAt(it).id },
         )
         assertEquals(
@@ -1876,7 +1876,16 @@ class ComponentInflationTest {
 
         assertNotNull(root.findViewById<View>(R.id.eyebrowActivity))
         assertNotNull(root.findViewById<View>(R.id.eyebrowAccount))
-        assertNotNull(root.findViewById<View>(R.id.txtProfileVersion))
+        assertEquals(
+            "the profile carries no quick-action strip: that block is Home's",
+            null,
+            root.findViewById<View>(R.id.attendeeQuickActions),
+        )
+        assertEquals(
+            "the version footer is deleted, not hidden",
+            0,
+            context.resources.getIdentifier("txtProfileVersion", "id", context.packageName),
+        )
     }
 
     // ---- Form section headings (plan §3, §5.2, §6.7 v1.32) ----------------------------------

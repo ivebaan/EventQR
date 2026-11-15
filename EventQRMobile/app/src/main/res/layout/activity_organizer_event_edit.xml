@@ -10,7 +10,7 @@
                       block order:
                         Event         Title (required), Venue (optional)
                         Schedule      Event dates, locked, + one micro note
-                        Registration  Registration window (locked), Capacity (required, >= registered)
+                        Registration  Registration (locked), Capacity (required, >= registered)
                         About         Description, multiline
                         Banner        16:9 preview, "Choose banner", one micro note
         Save bar      ui_surface, hairline on top, space_12 top/bottom, "Unsaved changes" state
@@ -240,7 +240,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="@string/ui_organizer_edit_event_dates"
+                            android:text="@string/common_event_schedule"
                             android:textAppearance="@style/TextAppearance.EventQR.Type.Overline"
                             android:textColor="@color/ui_text_secondary" />
 
@@ -307,7 +307,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="@string/ui_organizer_registration_window"
+                            android:text="@string/common_event_registration"
                             android:textAppearance="@style/TextAppearance.EventQR.Type.Overline"
                             android:textColor="@color/ui_text_secondary" />
 

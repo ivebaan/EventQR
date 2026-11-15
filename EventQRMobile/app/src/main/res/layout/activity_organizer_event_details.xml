@@ -5,7 +5,7 @@
         Top bar      56dp, back + "Event details"
         Head         include_organizer_event_head: name only, tear - identity only. The badge is the
                      table's STATUS row here, so the head binds with showStatus = false
-        Spec table   Status, Location, Event time, Registration window, About, Organizer, Co-organizers.
+        Spec table   Status, Location, Schedule, Registration, About, Organizer, Co-organizers.
                      Label left, value right, hairline inset to the gutters; About is the same row block
                      with the body under its label
         Review note  adminRemarks once, error tone for Rejected, warning for Pending review
@@ -169,7 +169,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="@string/ui_organizer_event_time"
+                        android:text="@string/common_event_schedule"
                         android:textAppearance="@style/TextAppearance.EventQR.Type.Overline"
                         android:textColor="@color/ui_text_secondary" />
 
@@ -211,7 +211,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="@string/ui_organizer_registration_window"
+                        android:text="@string/common_event_registration"
                         android:textAppearance="@style/TextAppearance.EventQR.Type.Overline"
                         android:textColor="@color/ui_text_secondary" />
 

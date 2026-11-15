@@ -58,30 +58,50 @@ class AdminDashboardTest {
     // ---- loading
 
     @Test
-    fun firstLoad_showsHeadAndRowSkeletons_thenRevealsTheRealHead() {
+    fun firstLoad_keepsTheRealHead_andOnlyTheQueueIsPlaceholder() {
         val activity = dashboard()
 
-        assertEquals(
-            View.VISIBLE,
-            activity.findViewById<View>(R.id.passHeadSkeleton).visibility,
-        )
-        assertEquals(View.GONE, activity.findViewById<View>(R.id.passHead).visibility)
+        // The head renders from the session and from constants, so it is on screen from the first
+        // frame with its counts dashed - the attendee home's behaviour. It is never skeletoned.
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.passHead).visibility)
+        assertEquals("Admin", headTitle(activity))
+        assertEquals("--", headValue(activity, R.id.passHeadStat1Value))
+        assertEquals("--", headValue(activity, R.id.passHeadStat3Value))
         assertEquals(
             View.VISIBLE,
             activity.findViewById<View>(R.id.skeletonDashboard).visibility,
+        )
+        assertEquals(
+            View.GONE,
+            activity.findViewById<LinearLayout>(R.id.pendingRowsContainer).visibility,
         )
 
         activity.renderStats(AdminStatsResponse(pendingEventRequests = 0))
 
-        assertEquals(
-            View.GONE,
-            activity.findViewById<View>(R.id.passHeadSkeleton).visibility,
-        )
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.skeletonDashboard).visibility)
         assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.passHead).visibility)
+        assertEquals("0", headValue(activity, R.id.passHeadStat1Value))
         assertEquals(
-            View.GONE,
-            activity.findViewById<View>(R.id.skeletonDashboard).visibility,
+            View.VISIBLE,
+            activity.findViewById<TextView>(R.id.textNoPending).visibility,
         )
+    }
+
+    /**
+     * The queue skeleton is the loaded queue's height: three [R.dimen.ui_skeleton_row_height] rows
+     * plus the 1dp divider every loaded `list_row_icon` draws. Static `include_skeleton_row` bars,
+     * so reduced motion has nothing to switch off here.
+     */
+    @Test
+    fun queueSkeleton_matchesTheLoadedRowGeometry() {
+        val activity = dashboard()
+        val skeleton = activity.findViewById<LinearLayout>(R.id.skeletonDashboard)
+
+        val rowHeight = activity.resources.getDimensionPixelSize(R.dimen.ui_skeleton_row_height)
+        val hairline = activity.resources.getDimensionPixelSize(R.dimen.stroke_hairline)
+        val drawn = (0 until skeleton.childCount).sumOf { skeleton.getChildAt(it).layoutParams.height }
+
+        assertEquals(3 * (rowHeight + hairline), drawn)
     }
 
     // ---- pass head
@@ -300,6 +320,7 @@ class AdminDashboardTest {
             "rowAuditLogs",
             "progressDashboardLoading",
             "textDashboardLoadHint",
+            "passHeadSkeleton",
         ).forEach { id ->
             assertEquals(
                 "the dashboard must not carry $id: it duplicated the bottom nav or the stub",

@@ -17,6 +17,10 @@
 
     authTopBar carries the status-bar inset and authFooter the navigation-bar inset (see
     RegistrationActivity) so neither fill is clipped by the system bars.
+
+    IME Next walks the fields in visual order (first, last, email, phone, password, confirm) through
+    an explicit nextFocusForward chain: relying on traversal order skipped last name, because the two
+    name fields share a row and the search fell through to the email box below.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -131,8 +135,10 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/space_sm"
                         android:autoText="false"
+                        android:imeOptions="actionNext"
                         android:inputType="textPersonName"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                        android:nextFocusForward="@id/edtLastName" />
 
                         <TextView
                             android:id="@+id/txtFirstNameError"
@@ -165,8 +171,10 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/space_sm"
                         android:autoText="false"
+                        android:imeOptions="actionNext"
                         android:inputType="textPersonName"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                        android:nextFocusForward="@id/edtEmail" />
 
                         <TextView
                             android:id="@+id/txtLastNameError"
@@ -210,8 +218,10 @@
                 android:autoText="false"
                 android:drawableStart="@drawable/ic_ui_mail"
                 android:hint="@string/auth_hint_email"
+                android:imeOptions="actionNext"
                 android:inputType="textEmailAddress"
-                android:maxLines="1" />
+                android:maxLines="1"
+                android:nextFocusForward="@id/edtPhoneNumber" />
 
             <TextView
                 android:id="@+id/txtEmailError"
@@ -263,8 +273,10 @@
                     android:layout_weight="1"
                     android:background="@null"
                     android:hint="@string/phone_hint_digits"
+                    android:imeOptions="actionNext"
                     android:inputType="number"
                     android:maxLines="1"
+                    android:nextFocusForward="@id/edtPassword"
                     android:paddingEnd="@dimen/space_lg"
                     android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
                     android:textColor="@color/ui_text_primary"
@@ -316,8 +328,11 @@
                     android:autoText="false"
                     android:drawableStart="@drawable/ic_ui_lock"
                     android:hint="@string/common_enter_password"
+                    android:imeOptions="actionNext"
                     android:inputType="textPassword"
-                    android:maxLines="1" />
+                    android:maxLines="1"
+                    android:nextFocusDown="@id/edtConfirmPassword"
+                    android:nextFocusForward="@id/edtConfirmPassword" />
             </com.thedavelopers.eventqr.ui.components.PasswordTextInputLayout>
 
             <TextView
@@ -418,6 +433,7 @@
                     android:autoText="false"
                     android:drawableStart="@drawable/ic_ui_lock"
                     android:hint="@string/auth_hint_confirm_password"
+                    android:imeOptions="actionDone"
                     android:inputType="textPassword"
                     android:maxLines="1" />
             </com.thedavelopers.eventqr.ui.components.PasswordTextInputLayout>

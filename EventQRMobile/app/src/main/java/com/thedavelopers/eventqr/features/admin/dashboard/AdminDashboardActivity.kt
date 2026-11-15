@@ -49,7 +49,6 @@ class AdminDashboardActivity : AppCompatActivity() {
     private lateinit var sessionManager: SessionManager
 
     private lateinit var passHead: View
-    private lateinit var passHeadSkeleton: View
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var skeletonDashboard: View
     private lateinit var layoutDashboardError: EventQrEmptyState
@@ -70,7 +69,6 @@ class AdminDashboardActivity : AppCompatActivity() {
         setContentView(R.layout.activity_admin_dashboard)
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
-        findViewById<View>(R.id.passHeadSkeletonIdentity).applyEventQrTopInsetPadding()
 
         repository = AdminRepository(this)
         sessionManager = SessionManager(this)
@@ -96,7 +94,6 @@ class AdminDashboardActivity : AppCompatActivity() {
 
     private fun bindViews() {
         passHead = findViewById(R.id.passHead)
-        passHeadSkeleton = findViewById(R.id.passHeadSkeleton)
         swipeRefreshLayout = findViewById(R.id.swipeRefreshDashboard)
         skeletonDashboard = findViewById(R.id.skeletonDashboard)
         layoutDashboardError = findViewById(R.id.layoutDashboardError)
@@ -226,7 +223,6 @@ class AdminDashboardActivity : AppCompatActivity() {
     /** Pass head counts and the waiting queue. `null` = the stats call failed. */
     internal fun renderStats(stats: AdminStatsResponse?) {
         skeletonDashboard.visibility = View.GONE
-        passHeadSkeleton.visibility = View.GONE
         passHead.visibility = View.VISIBLE
         bindStatValue(R.id.passHeadStat1Value, stats?.pendingEventRequests)
         bindStatValue(R.id.passHeadStat2Value, stats?.activeEvents)
@@ -316,9 +312,11 @@ class AdminDashboardActivity : AppCompatActivity() {
             if (auditRowsContainer.childCount == 0) View.GONE else View.VISIBLE
     }
 
+    /**
+     * First load: the queue is the only region the request fills. The head stays on screen with its
+     * `--` counts - its tabs, title and labels never depended on the request (§5.11).
+     */
     private fun showLoadingSkeleton() {
-        passHeadSkeleton.visibility = View.VISIBLE
-        passHead.visibility = View.GONE
         skeletonDashboard.visibility = View.VISIBLE
         layoutDashboardError.visibility = View.GONE
         pendingRowsContainer.visibility = View.GONE

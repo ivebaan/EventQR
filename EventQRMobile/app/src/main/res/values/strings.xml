@@ -368,6 +368,10 @@
     <string name="common_venue_tbd">Location TBD</string>
     <string name="event_request_card_submitted_submitted_1_s">Submitted %1$s</string>
     <string name="common_description">Description</string>
+    <!-- One term for one concept (§7.7): every screen that labels an event's schedule or its
+         registration range reads these two, so attendee, organizer, staff and admin cannot drift. -->
+    <string name="common_event_schedule">Schedule</string>
+    <string name="common_event_registration">Registration</string>
     <string name="event_request_detail_missing_event_request_information">Missing event request information.</string>
     <string name="event_request_detail_unable_to_load_request_details">Unable to load request details.</string>
     <string name="portal_staff_portal">Staff Portal</string>

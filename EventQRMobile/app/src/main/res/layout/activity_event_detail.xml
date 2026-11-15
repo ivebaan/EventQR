@@ -212,7 +212,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/ui_attendee_event_time"
+                        android:text="@string/common_event_schedule"
                         android:textAppearance="@style/TextAppearance.EventQR.Type.Overline" />
 
                     <TextView
@@ -249,7 +249,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/ui_attendee_registration_window"
+                        android:text="@string/common_event_registration"
                         android:textAppearance="@style/TextAppearance.EventQR.Type.Overline" />
 
                     <TextView

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    JUSTIFIED PROSE BODY (6.5).
+
+    Compose `Text` cannot justify, so the two long bodies of the event request detail (Reason for
+    request, Description) render this TextView through an `AndroidView`: the `body` role, start
+    aligned so RTL reads from its own edge, no fixed height, no maxLines and no ellipsize, so a
+    fontScale 2.0 body wraps and grows instead of clipping. `justificationMode=inter_word` stretches
+    the spaces between words only - hyphenation and word order are untouched - and it is API 26,
+    which is this build's minSdk. Alignment stays the start edge, never centred (4.5).
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:breakStrategy="high_quality"
+    android:gravity="start|top"
+    android:justificationMode="inter_word"
+    android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
+    android:textColor="@color/ui_text_primary" />

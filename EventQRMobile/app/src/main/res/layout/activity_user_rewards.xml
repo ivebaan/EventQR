@@ -3,7 +3,8 @@
     Rewards (§6.2 of MyFiles/EventQR-Redesign-Plan.md) - retires Gen A.
 
         Compact pass head ("Rewards")
-        Event field (48dp, filled) - the reward list is per event, so the event comes first
+        Event picker (the shared searchable field, plan 5.2) - the reward list is per event, so the
+        event comes first
         Balance: a prominent tabular number on the flat page, never a gradient card. It carries
         lime only through the status badge on a reward, never as decoration.
         Chip row: Available / Claimed / History
@@ -11,6 +12,8 @@
 
     Deleted: the 315-degree gradient balance card with the 46sp number, the violet text action,
     bg_reward_points, bg_reward_dark_card, per-reward raised cards, and the copy-pasted skeletons.
+    Also deleted (v1.57): the hand-built event dropdown - the 48dp selector box, its overlay
+    skeleton, its hidden Spinner and the PopupWindow of rows - now the shared EventPickerField.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -96,65 +99,20 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <!-- ═════════ Event field ═════════ -->
+                    <!-- ═════════ Event picker: the shared searchable field (plan 5.2) ═════════ -->
                     <TextView
                         android:id="@+id/txtSelectEventLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:labelFor="@id/event_picker_field"
                         android:text="@string/ui_attendee_registered_event"
                         android:textAppearance="@style/TextAppearance.EventQR.Type.FieldLabel" />
 
-                    <LinearLayout
-                        android:id="@+id/cardSelectedEvent"
+                    <com.thedavelopers.eventqr.ui.components.EventPickerField
+                        android:id="@id/event_picker_field"
                         android:layout_width="match_parent"
-                        android:layout_height="@dimen/ui_field_search_height"
-                        android:layout_marginTop="@dimen/space_sm"
-                        android:background="@drawable/bg_ui_field"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <LinearLayout
-                            android:id="@+id/layoutDropdownContent"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal"
-                            android:paddingStart="@dimen/space_lg"
-                            android:paddingEnd="@dimen/space_md">
-
-                            <TextView
-                                android:id="@+id/txtSelectedEventTitle"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:ellipsize="end"
-                                android:maxLines="1"
-                                android:text="@string/common_select_event"
-                                android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
-                                android:textColor="@color/ui_text_primary" />
-
-                            <ImageView
-                                android:id="@+id/spinnerArrow"
-                                style="@style/Widget.EventQR.Ui.Selector.Caret"
-                                android:layout_marginStart="@dimen/space_sm"
-                                android:importantForAccessibility="no" />
-                        </LinearLayout>
-
-                        <View
-                            android:id="@+id/skeletonDropdown"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@drawable/bg_ui_skeleton"
-                            android:visibility="gone" />
-                    </LinearLayout>
-
-                    <Spinner
-                        android:id="@+id/spinnerRegisteredEvents"
-                        android:layout_width="0dp"
-                        android:layout_height="0dp"
-                        android:visibility="gone" />
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_sm" />
 
                     <!-- ═════════ Balance: the number is the content ═════════ -->
                     <LinearLayout

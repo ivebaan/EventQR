@@ -778,7 +778,7 @@ class EventDetailActivityTest {
         val row = activity.findViewById<View>(R.id.layoutEventTimeRow)
         val value = activity.findViewById<TextView>(R.id.txtDetailEventTime)
 
-        assertEquals("Event time", (row as LinearLayout).getChildAt(0).let { (it as TextView).text.toString() })
+        assertEquals("Schedule", (row as LinearLayout).getChildAt(0).let { (it as TextView).text.toString() })
         assertEquals(formatEventTime(activity, fest.eventStartAt, fest.eventEndAt), value.text.toString())
         assertEquals(View.VISIBLE, row.visibility)
         assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.viewEventTimeDivider).visibility)

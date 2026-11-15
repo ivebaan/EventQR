@@ -21,7 +21,6 @@ import com.google.android.material.snackbar.Snackbar
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
-import com.thedavelopers.eventqr.core.api.dto.AccountStatus
 import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.core.util.PagedAccumulator
 import com.thedavelopers.eventqr.core.util.RoleMapper
@@ -60,7 +59,8 @@ class AdminAccountManagementActivity : AppCompatActivity() {
     }
 
     private lateinit var sessionManager: SessionManager
-    private lateinit var adapter: AdminAccountAdapter
+    @VisibleForTesting
+    internal lateinit var adapter: AdminAccountAdapter
     private lateinit var searchInput: EditText
     private lateinit var recyclerAccounts: RecyclerView
     private lateinit var skeletonAccounts: View
@@ -72,6 +72,7 @@ class AdminAccountManagementActivity : AppCompatActivity() {
     private var searchQuery: String = ""
     private var searchJob: Job? = null
     private var retrySnackbar: Snackbar? = null
+    private var pendingActionUserId: java.util.UUID? = null
 
     private val selectedRoleFilter = MutableStateFlow<AccountRole?>(null)
     private val currentUserId: String? by lazy { sessionManager.getUserId() }
@@ -89,7 +90,10 @@ class AdminAccountManagementActivity : AppCompatActivity() {
         applyEventQrSystemBarAppearance()
 
         sessionManager = SessionManager(this)
-        adapter = AdminAccountAdapter(onActionClick = ::onAccountActionClick)
+        adapter = AdminAccountAdapter(
+            selfUserId = currentUserId,
+            onActionClick = ::onAccountActionClick,
+        )
         bindViews()
         bindHeader()
         bindCreateRow()
@@ -286,39 +290,114 @@ class AdminAccountManagementActivity : AppCompatActivity() {
         retrySnackbar?.show()
     }
 
-    private fun onAccountActionClick(user: UserResponse) {
-        // Mirrors the adapter: an active account and a super admin are not deletable.
-        if (user.status == AccountStatus.ACTIVE || user.role == AccountRole.SUPER_ADMIN) return
+    @VisibleForTesting
+    internal fun onAccountActionClick(user: UserResponse, action: AccountAction) {
+        // Own row first: the adapter hides it, and the guard names why if it is ever reached.
         if (user.userId.toString() == currentUserId) {
-            Snackbar.make(recyclerAccounts, R.string.ui_admin_accounts_self_delete, Snackbar.LENGTH_SHORT).show()
+            val message = when (action) {
+                AccountAction.ENABLE -> R.string.ui_admin_accounts_self_enable
+                AccountAction.DISABLE -> R.string.ui_admin_accounts_self_disable
+                AccountAction.DELETE -> R.string.ui_admin_accounts_self_delete
+            }
+            Snackbar.make(recyclerAccounts, message, Snackbar.LENGTH_SHORT).show()
             return
         }
-        showDeleteConfirmation(user)
+        // Mirrors the adapter: never run an action the row did not offer.
+        if (action !in accountRowActions(user, currentUserId)) return
+        when (action) {
+            AccountAction.DISABLE -> showConfirmation(
+                user = user,
+                titleRes = R.string.ui_admin_accounts_disable_title,
+                bodyRes = R.string.ui_admin_accounts_disable_body,
+                cancelRes = R.string.ui_admin_accounts_keep_active,
+                confirmRes = R.string.ui_admin_accounts_disable,
+                destructive = true,
+            ) { performStatusChange(user, AccountAction.DISABLE) }
+            AccountAction.ENABLE -> showConfirmation(
+                user = user,
+                titleRes = R.string.ui_admin_accounts_enable_title,
+                bodyRes = R.string.ui_admin_accounts_enable_body,
+                cancelRes = R.string.ui_admin_accounts_keep_disabled,
+                confirmRes = R.string.ui_admin_accounts_enable,
+                destructive = false,
+            ) { performStatusChange(user, AccountAction.ENABLE) }
+            AccountAction.DELETE -> showConfirmation(
+                user = user,
+                titleRes = R.string.ui_admin_accounts_delete_title,
+                bodyRes = R.string.ui_admin_accounts_delete_body,
+                cancelRes = R.string.ui_admin_accounts_keep,
+                confirmRes = R.string.ui_admin_accounts_delete,
+                destructive = true,
+            ) { performDelete(user) }
+        }
     }
 
-    /** §5.12: `dialog_base` with the verb as the destructive commit. */
-    private fun showDeleteConfirmation(user: UserResponse) {
+    /** §5.12: `dialog_base` with the verb as the commit; only a destructive verb takes the fill. */
+    private fun showConfirmation(
+        user: UserResponse,
+        titleRes: Int,
+        bodyRes: Int,
+        cancelRes: Int,
+        confirmRes: Int,
+        destructive: Boolean,
+        onConfirm: () -> Unit,
+    ) {
         val view = layoutInflater.inflate(R.layout.dialog_base, null, false)
         val dialog = AlertDialog.Builder(this).setView(view).create()
 
-        view.findViewById<TextView>(R.id.dialogTitle).setText(R.string.ui_admin_accounts_delete_title)
-        view.findViewById<TextView>(R.id.dialogBody).text =
-            getString(R.string.ui_admin_accounts_delete_body, user.fullName)
+        view.findViewById<TextView>(R.id.dialogTitle).setText(titleRes)
+        view.findViewById<TextView>(R.id.dialogBody).text = getString(bodyRes, user.fullName)
 
         view.findViewById<Button>(R.id.dialogNegative).apply {
-            setText(R.string.ui_admin_accounts_keep)
+            setText(cancelRes)
             setOnClickListener { dialog.dismiss() }
         }
         view.findViewById<Button>(R.id.dialogPositive).apply {
-            setText(R.string.ui_admin_accounts_delete)
-            setBackgroundResource(R.drawable.bg_ui_button_destructive_commit)
-            setTextColor(ContextCompat.getColor(context, R.color.ui_on_primary))
+            setText(confirmRes)
+            if (destructive) {
+                setBackgroundResource(R.drawable.bg_ui_button_destructive_commit)
+                setTextColor(ContextCompat.getColor(context, R.color.ui_on_primary))
+            }
             setOnClickListener {
                 dialog.dismiss()
-                performDelete(user)
+                onConfirm()
             }
         }
         dialog.show()
+    }
+
+    /**
+     * Disable and enable answer with the updated account, so the row repaints in place - badge and
+     * overflow - and the page keeps its scroll position. The row in flight cannot be reused.
+     */
+    private fun performStatusChange(user: UserResponse, action: AccountAction) {
+        if (pendingActionUserId != null) return
+        pendingActionUserId = user.userId
+        adapter.setPending(user.userId)
+        lifecycleScope.launch {
+            val result = when (action) {
+                AccountAction.DISABLE -> repository.disableUser(user.userId.toString())
+                else -> repository.enableUser(user.userId.toString())
+            }
+            pendingActionUserId = null
+            adapter.setPending(null)
+            when (result) {
+                is NetworkResult.Success -> {
+                    paging.replace(result.data)
+                    adapter.updateUser(result.data)
+                    val message = if (action == AccountAction.DISABLE) {
+                        R.string.ui_admin_accounts_disabled
+                    } else {
+                        R.string.ui_admin_accounts_enabled
+                    }
+                    Snackbar.make(recyclerAccounts, message, Snackbar.LENGTH_SHORT).show()
+                }
+                is NetworkResult.Error -> {
+                    Snackbar.make(recyclerAccounts, errorText(result), Snackbar.LENGTH_LONG).show()
+                }
+                NetworkResult.Loading -> Unit
+            }
+        }
     }
 
     private fun performDelete(user: UserResponse) {
@@ -329,13 +408,16 @@ class AdminAccountManagementActivity : AppCompatActivity() {
                     loadAccounts()
                 }
                 is NetworkResult.Error -> {
-                    val message = result.serverMessage?.takeIf { it.isNotBlank() } ?: result.message
-                    Snackbar.make(recyclerAccounts, message, Snackbar.LENGTH_LONG).show()
+                    Snackbar.make(recyclerAccounts, errorText(result), Snackbar.LENGTH_LONG).show()
                 }
                 NetworkResult.Loading -> Unit
             }
         }
     }
+
+    /** Server text when the backend sent one, else the transport's own sentence. */
+    private fun errorText(result: NetworkResult.Error): String =
+        result.serverMessage?.takeIf { it.isNotBlank() } ?: result.message
 
     private fun isSuperAdmin(): Boolean {
         return RoleMapper.normalizeRole(sessionManager.getUserRole()) == AccountRole.SUPER_ADMIN.name

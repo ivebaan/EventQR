@@ -7,14 +7,20 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.features.ShadowEncryptedSharedPreferences
 import com.thedavelopers.eventqr.features.ShadowMasterKeys
+import com.thedavelopers.eventqr.features.attendee.AttendeeTransactionsActivity
+import com.thedavelopers.eventqr.features.attendee.RegisteredEventsActivity
+import com.thedavelopers.eventqr.features.attendee.RequestEventActivity
+import com.thedavelopers.eventqr.features.attendee.attendeeQuickActionDestination
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardSummary
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardUpcomingEvent
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 import java.time.Instant
@@ -180,5 +186,42 @@ class DashboardStatesTest {
 
         controller.pause().resume()
         assertEquals(3, activity.loadRequests)
+    }
+
+    /**
+     * The three quick-action chips are Home's own block, and the attendee Profile reaches the same
+     * destinations through its `My passes` ACTIVITY row. Both resolve the mapping in
+     * `features/attendee/AttendeeQuickActions.kt`, so "same navigation" is checked against the
+     * shared map on both screens rather than assumed.
+     */
+    @Test
+    fun quickActionChips_openTheAttendeeDestinations() {
+        val activity = build()
+
+        val strip = activity.findViewById<View>(R.id.attendeeQuickActions)
+        assertNotNull("Home keeps its QUICK ACTIONS block", strip)
+        assertEquals(
+            "the eyebrow is the section heading TalkBack navigates to",
+            activity.getString(R.string.ui_attendee_quick_actions),
+            strip.findViewById<TextView>(R.id.eyebrowQuickActions).text.toString(),
+        )
+
+        listOf(
+            R.id.btnMyPasses to RegisteredEventsActivity::class.java,
+            R.id.btnTransactionHistory to AttendeeTransactionsActivity::class.java,
+            R.id.btnRequestEventCard to RequestEventActivity::class.java,
+        ).forEach { (id, destination) ->
+            assertEquals(
+                "${activity.resources.getResourceEntryName(id)} maps to ${destination.simpleName}",
+                destination,
+                attendeeQuickActionDestination(id),
+            )
+            activity.findViewById<View>(id).performClick()
+            assertEquals(
+                "${activity.resources.getResourceEntryName(id)} opens ${destination.simpleName}",
+                destination.name,
+                shadowOf(activity).nextStartedActivity.component?.className,
+            )
+        }
     }
 }

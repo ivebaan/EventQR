@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Filled destructive label: white on ui_error, ui_outline_interactive once the action is
+     unavailable - the same pair the primary button uses (ui_button_primary_text), because the
+     disabled fill is the same neutral ui_disabled_fill and a white label on it is 1.29:1, i.e.
+     invisible. Disabled text is exempt from WCAG 1.4.3 and this is a label, not a boundary. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false" android:color="@color/ui_outline_interactive" />
+    <item android:color="@color/ui_on_primary" />
+</selector>

@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Overflow holds one action (§5.5). Enable/Disable retired: status is not an admin task here. -->
+<!--
+    Account row overflow (5.5). The items offered depend on the row's status: an ACTIVE account
+    offers `Disable account` alone; an INACTIVE or SUSPENDED one offers `Enable account` then
+    `Delete account`. `AdminAccountAdapter` hides the whole menu for a SUPER_ADMIN row and for the
+    signed-in user's own row, and never inflates an item it does not offer.
+-->
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_enable"
+        android:title="@string/ui_admin_accounts_enable" />
+    <item
+        android:id="@+id/action_disable"
+        android:title="@string/ui_admin_accounts_disable" />
     <item
         android:id="@+id/action_delete"
         android:title="@string/ui_admin_accounts_delete" />

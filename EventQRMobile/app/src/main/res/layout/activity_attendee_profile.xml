@@ -22,19 +22,25 @@
         carries a meta line - the real phone number, else "Name and phone number" - so its height
         never changes with the data. 72dp rows / 88dp with a two-line meta, 40dp tile, 20dp icon,
         stock ListRow.Divider inset 76dp to the title edge (hidden here: it is the only row).
-        ACTIVITY: one Card.Grouped with three list_row_icon rows (Transaction history, Claimed
-        rewards, My event requests), each with a meta line and a trailing chevron. Transaction
-        history prints no points balance: PointBalanceResponse is per event, so the row keeps its
-        chevron rather than printing another event's number.
+        ACTIVITY: one Card.Grouped with four list_row_icon rows (My passes, Transaction history,
+        Claimed rewards, My event requests), each with a meta line and a trailing chevron. My passes
+        leads because it is the top-of-mind action and it mirrors the dashboard chip order; it opens
+        the registered-events screen through the same attendeeQuickActionDestination(R.id.btnMyPasses)
+        the dashboard's chip uses, so the two cannot drift. There is no quick-action strip here: the
+        chips are Home's, and a second copy of that block turned this screen into a dashboard.
+        Transaction history prints no points balance: PointBalanceResponse is per event, so the row
+        keeps its chevron rather than printing another event's number.
 
-        Then Sign out - the full-width 52dp Button.Destructive, space_32 under the Activity card -
-        and the version footer (space_16 under it, space_32 page padding). First load skeletons the
-        two sections only; the identity block renders from the session, so it stays.
+        Then Sign out - the full-width 52dp filled DestructiveCommit block (ui_error fill, white
+        `ui_on_primary` label, 6.59:1), space_32 under the ACTIVITY card. There is no version footer: the
+        page ends on Sign out (v1.52). First load skeletons the two sections only; the identity
+        block renders from the session, so it stays.
 
     Deleted: the outside-the-ScrollView identity band, the white-outline role pill, the four
     copy-pasted LinearLayout rows, the personal-details card, the dead btnEditProfile stub, the
-    Switch portal row (the dashboard role tabs still reach the other portal) and the label-width
-    Sign out that orphaned itself under the cards.
+    Switch portal row (the dashboard role tabs still reach the other portal), the label-width
+    Sign out that orphaned itself under the cards, and the `txtProfileVersion` footer with its
+    `ui_attendee_version` string.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -185,10 +191,10 @@
                 <!-- Sections-shaped skeleton: the identity block stays on screen (cached session
                      values, never empty), so the skeleton mirrors the region it replaces in the
                      loaded order - ACCOUNT's eyebrow bar and its single row, then ACTIVITY's
-                     eyebrow bar and its three rows (§5.11). A loaded row with its one-line meta
+                     eyebrow bar and its four rows (§5.11). A loaded row with its one-line meta
                      lands on 76dp (14 + 26 title + 2 + 20 meta), so each 72dp
                      ui_skeleton_row_height row carries one space_xs grid step and the ACTIVITY
-                     card keeps its two hairlines: 3 x 72 + 3 x 4 + 2 x 1 = 230dp, the loaded
+                     card keeps its three hairlines: 4 x 72 + 4 x 4 + 3 x 1 = 307dp, the loaded
                      card's height; the ACCOUNT card is the single 76dp row. -->
                 <LinearLayout
                     android:id="@+id/skeletonLoading"
@@ -267,6 +273,19 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/ui_skeleton_row_height"
                             android:layout_marginBottom="@dimen/space_xs" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="@dimen/stroke_hairline"
+                            android:layout_marginStart="@dimen/ui_divider_inset"
+                            android:background="@color/ui_hairline"
+                            android:importantForAccessibility="no" />
+
+                        <include
+                            layout="@layout/include_skeleton_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="@dimen/ui_skeleton_row_height"
+                            android:layout_marginBottom="@dimen/space_xs" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -311,7 +330,7 @@
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
-                    <!-- ═════════ ACTIVITY: three rows, one card ═════════ -->
+                    <!-- ═════════ ACTIVITY: four rows, one card ═════════ -->
                     <TextView
                         android:id="@+id/eyebrowActivity"
                         android:layout_width="match_parent"
@@ -340,6 +359,12 @@
                             android:orientation="vertical">
 
                             <include
+                                android:id="@+id/rowMyPasses"
+                                layout="@layout/list_row_icon"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content" />
+
+                            <include
                                 android:id="@+id/rowTransactionHistory"
                                 layout="@layout/list_row_icon"
                                 android:layout_width="match_parent"
@@ -360,11 +385,11 @@
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
 
-                <!-- Static chrome, outside the skeleton region: Sign out and the build version are
-                     on screen from the first frame, so they never pop in after the load. -->
+                <!-- Static chrome, outside the skeleton region: Sign out is on screen from the
+                     first frame, so it never pops in after the load. -->
                 <TextView
                     android:id="@+id/cardSignOut"
-                    style="@style/Widget.EventQR.Ui.Button.Destructive"
+                    style="@style/Widget.EventQR.Ui.Button.DestructiveCommit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="@dimen/ui_gutter"
@@ -372,17 +397,6 @@
                     android:layout_marginEnd="@dimen/ui_gutter"
                     android:focusable="true"
                     android:text="@string/ui_attendee_sign_out" />
-
-                <TextView
-                    android:id="@+id/txtProfileVersion"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/ui_gutter"
-                    android:layout_marginTop="@dimen/space_16"
-                    android:layout_marginEnd="@dimen/ui_gutter"
-                    android:textAppearance="@style/TextAppearance.EventQR.Type.BodySmall"
-                    android:textColor="@color/ui_text_secondary"
-                    tools:text="Version 1.0 (1)" />
             </LinearLayout>
         </ScrollView>
     </com.thedavelopers.eventqr.ui.components.EventQrSwipeRefreshLayout>

@@ -34,6 +34,7 @@ import com.thedavelopers.eventqr.features.attendee.EXTRA_EVENT_START
 import com.thedavelopers.eventqr.features.attendee.EXTRA_EVENT_STATUS
 import com.thedavelopers.eventqr.features.attendee.EXTRA_EVENT_TITLE
 import com.thedavelopers.eventqr.features.attendee.configureAttendeeBottomNav
+import com.thedavelopers.eventqr.features.attendee.configureAttendeeQuickActions
 import com.thedavelopers.eventqr.features.auth.AuthRepository
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardSummary
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardUpcomingEvent
@@ -44,7 +45,6 @@ import com.thedavelopers.eventqr.ui.components.PassHeadBinder
 import com.thedavelopers.eventqr.ui.components.PassHeadModel
 import com.thedavelopers.eventqr.ui.components.showInlineError
 import com.thedavelopers.eventqr.ui.icons.AppIcons
-import com.thedavelopers.eventqr.ui.icons.FieldIcons
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
 import kotlinx.coroutines.launch
@@ -62,8 +62,6 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
     private lateinit var sessionManager: SessionManager
     private lateinit var passHead: View
     private lateinit var skeletonLoading: View
-    private lateinit var organizerCard: View
-    private lateinit var requestEventCard: View
     private lateinit var upcomingEventsLayout: LinearLayout
     private lateinit var discoverEventsLayout: LinearLayout
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
@@ -101,13 +99,10 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
 
         passHead = findViewById(R.id.passHead)
         skeletonLoading = findViewById(R.id.skeletonLoading)
-        organizerCard = findViewById(R.id.btnTransactionHistory)
-        requestEventCard = findViewById(R.id.btnRequestEventCard)
-        // The quick-action chips carry a 20dp glyph; a compound drawable would otherwise lay out at
-        // the vector's 24dp intrinsic size (§5.6).
-        listOf(R.id.btnMyPasses, R.id.btnTransactionHistory, R.id.btnRequestEventCard).forEach {
-            FieldIcons.apply(findViewById(it))
-        }
+        // The quick-action chips carry a 20dp glyph and three destinations worth keeping in one
+        // place: features/attendee/AttendeeQuickActions.kt owns both, and the attendee Profile's
+        // My passes row resolves the same mapping.
+        configureAttendeeQuickActions()
         upcomingEventsLayout = findViewById(R.id.layoutUpcomingEvents)
         discoverEventsLayout = findViewById(R.id.layoutDiscoverEvents)
         swipeRefreshLayout = findViewById(R.id.swipeRefreshDashboard)
@@ -123,7 +118,6 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         }
 
         bindPassHead()
-        configureActions()
         reload()
     }
 
@@ -446,18 +440,6 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
                 startActivity(Intent(this, com.thedavelopers.eventqr.features.admin.dashboard.AdminDashboardActivity::class.java))
                 finish()
             }
-        }
-    }
-
-    private fun configureActions() {
-        findViewById<View>(R.id.btnMyPasses).setOnClickListener {
-            startActivity(Intent(this, com.thedavelopers.eventqr.features.attendee.RegisteredEventsActivity::class.java))
-        }
-        organizerCard.setOnClickListener {
-            startActivity(Intent(this, com.thedavelopers.eventqr.features.attendee.AttendeeTransactionsActivity::class.java))
-        }
-        requestEventCard.setOnClickListener {
-            startActivity(Intent(this, com.thedavelopers.eventqr.features.attendee.RequestEventActivity::class.java))
         }
     }
 

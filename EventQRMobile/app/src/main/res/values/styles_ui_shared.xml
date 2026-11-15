@@ -59,11 +59,13 @@
         <item name="android:textAppearance">@style/TextAppearance.EventQR.Type.ButtonLabelInline</item>
     </style>
 
-    <!-- Destructive COMMIT: the only filled red button in the app, and only inside a confirm
-         dialog. Use ui_error fill with white text; the verb is the label ("Delete"). -->
+    <!-- Destructive COMMIT: the app's only filled red button. It is a dialog commit ("Delete") and
+         the attendee Profile's page-level `Sign out` (v1.52) - the one block in normal flow the
+         user must be able to find by colour. ui_error fill with white text, press darkens to
+         ui_on_error_container. A red-tinted row or a second filled CTA in flow is still banned. -->
     <style name="Widget.EventQR.Ui.Button.DestructiveCommit" parent="@style/Widget.EventQR.Ui.Button.Primary">
         <item name="android:background">@drawable/bg_ui_button_destructive_commit</item>
-        <item name="android:textColor">@color/ui_on_primary</item>
+        <item name="android:textColor">@color/ui_button_destructive_commit_text</item>
     </style>
 
     <!-- 48dp icon button: transparent at rest, ui_primary_wash on press, 2dp focus ring.

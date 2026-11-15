@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Destructive COMMIT (§5.1): the only filled red button, and only inside a confirm dialog.
-     ui_error fill, white label, radius 4, no elevation. Press darkens to
-     ui_on_error_container so the commit still reads as a press, not a state change. -->
+<!-- Destructive COMMIT (§5.1): the app's only filled red button - a confirm-dialog commit, and the
+     attendee Profile's page-level `Sign out` (v1.52). ui_error fill, white label, radius 4, no
+     elevation. Press darkens to ui_on_error_container so the button still reads as a press, not a
+     state change. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item android:state_enabled="false">

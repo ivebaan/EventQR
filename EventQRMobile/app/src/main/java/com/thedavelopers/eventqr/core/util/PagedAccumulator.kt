@@ -78,6 +78,15 @@ class PagedAccumulator<T, K>(private val keyOf: (T) -> K) {
         return true
     }
 
+    /** Swaps a loaded row for a fresher copy (same key). False when the row is not on screen. */
+    fun replace(item: T): Boolean {
+        val key = keyOf(item)
+        val index = rows.indexOfFirst { keyOf(it) == key }
+        if (index < 0) return false
+        rows[index] = item
+        return true
+    }
+
     fun onFailure(ticket: Ticket): Boolean {
         if (ticket.generation != generation) return false
         isLoading = false

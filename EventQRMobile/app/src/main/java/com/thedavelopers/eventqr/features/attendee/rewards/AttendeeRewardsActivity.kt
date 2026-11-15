@@ -2,17 +2,8 @@ package com.thedavelopers.eventqr.features.attendee
 
 import com.thedavelopers.eventqr.core.util.UiStrings
 import android.content.Intent
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.PopupWindow
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -21,10 +12,6 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.ui.icons.AppIcons
-import com.thedavelopers.eventqr.ui.theme.color
-import com.thedavelopers.eventqr.ui.theme.dimenOffset
-import com.thedavelopers.eventqr.ui.theme.setTextSizeRes
-import com.thedavelopers.eventqr.ui.theme.strong
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.RegistrationStatus
 import com.thedavelopers.eventqr.core.session.SessionManager
@@ -32,6 +19,8 @@ import com.thedavelopers.eventqr.features.registrations.RegistrationsCache
 import com.thedavelopers.eventqr.features.rewards.RewardAdapter
 import com.thedavelopers.eventqr.features.rewards.model.dto.PointBalanceResponse
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
 import com.thedavelopers.eventqr.ui.components.asFilterChips
@@ -41,10 +30,8 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
-    private data class RegisteredEventOption(
-        val eventId: String,
-        val title: String,
-    )
+    /** Test seam: the screen's network reads are the repository's. */
+    internal var repositoryOverride: AttendeeRepository? = null
 
     private lateinit var presenter: RewardsPresenter
     private lateinit var repository: AttendeeRepository
@@ -56,29 +43,19 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
     private lateinit var emptyEventsText: View
     private lateinit var emptyNotRegisteredText: View
     private lateinit var emptyRewardsText: EventQrEmptyState
-    private lateinit var eventSpinner: Spinner
+    private lateinit var eventPicker: EventPickerField
     private lateinit var balanceText: TextView
     private lateinit var rewardsSectionTitle: TextView
     private lateinit var claimsAction: TextView
     private lateinit var rewardsRecycler: RecyclerView
     private lateinit var rewardsBalanceCard: View
-    private lateinit var spinnerArrow: ImageView
-    private lateinit var cardSelectedEvent: View
-    private lateinit var txtSelectedEventTitle: TextView
-    private lateinit var selectEventLabel: View
     private lateinit var layoutRewardsContent: View
-
-    private lateinit var layoutDropdownContent: View
-    private lateinit var skeletonDropdown: View
     private lateinit var skeletonEventName: View
     private lateinit var layoutRewardsSkeleton: View
 
-    private val eventOptions = mutableListOf<RegisteredEventOption>()
+    private val eventOptions = mutableListOf<EventPickerOption>()
     private var selectedEventId: String? = null
-    private var selectedEventTitle: String = ""
     private var attendeeUserId: String? = null
-    private var eventPopup: PopupWindow? = null
-    private var isEventDropdownOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -112,7 +89,7 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
             )
         }
 
-        repository = AttendeeRepository(this)
+        repository = repositoryOverride ?: AttendeeRepository(this)
         presenter = RewardsPresenter(this, repository, UiStrings(this))
         adapter = RewardAdapter { reward ->
             val currentEventId = selectedEventId.orEmpty()
@@ -144,20 +121,14 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         emptyEventsText = findViewById(R.id.layoutNoRegisteredEvents)
         emptyNotRegisteredText = findViewById(R.id.layoutNotRegisteredForEvent)
         emptyRewardsText = findViewById(R.id.layoutRewardsEmpty)
-        eventSpinner = findViewById(R.id.spinnerRegisteredEvents)
-        cardSelectedEvent = findViewById(R.id.cardSelectedEvent)
-        txtSelectedEventTitle = findViewById(R.id.txtSelectedEventTitle)
-        selectEventLabel = findViewById(R.id.txtSelectEventLabel)
+        eventPicker = findViewById(R.id.event_picker_field)
         layoutRewardsContent = findViewById(R.id.layoutRewardsContent)
         balanceText = findViewById(R.id.txtRewardsBalance)
         rewardsSectionTitle = findViewById(R.id.txtRewardsSectionTitle)
         claimsAction = findViewById(R.id.txtMyClaims)
         rewardsRecycler = findViewById(R.id.recyclerRewards)
         rewardsBalanceCard = findViewById(R.id.cardRewardsBalance)
-        spinnerArrow = findViewById(R.id.spinnerArrow)
 
-        layoutDropdownContent = findViewById(R.id.layoutDropdownContent)
-        skeletonDropdown = findViewById(R.id.skeletonDropdown)
         skeletonEventName = findViewById(R.id.skeletonEventName)
         layoutRewardsSkeleton = findViewById(R.id.layoutRewardsSkeleton)
 
@@ -179,7 +150,14 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         retryButton.setOnClickListener { refreshRewardsPreservingSelection() }
         swipeRefresh.setOnRefreshListener { refreshRewardsPreservingSelection() }
 
-        cardSelectedEvent.setOnClickListener { setEventDropdownOpen(!isEventDropdownOpen) }
+        // A pick resolves the id against the loaded options; the event already on screen is a no-op
+        // (its rewards are loaded already). The popup is closed before the content rebuild.
+        eventPicker.setOnEventSelectedListener { id ->
+            val option = eventOptions.firstOrNull { it.id == id } ?: return@setOnEventSelectedListener
+            if (option.id == selectedEventId) return@setOnEventSelectedListener
+            eventPicker.dismissPopup()
+            loadSelectedEventRewards(option)
+        }
 
         attendeeUserId = SessionManager(this).getUserId()
         loadRegisteredEvents()
@@ -187,7 +165,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
 
     override fun onDestroy() {
         presenter.detach()
-        eventPopup?.dismiss()
         super.onDestroy()
     }
 
@@ -199,9 +176,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
             retryButton.visibility = View.GONE
             emptyRewardsText.visibility = View.GONE
 
-            layoutDropdownContent.visibility = if (showSkeleton) View.GONE else View.VISIBLE
-            skeletonDropdown.visibility = if (showSkeleton) View.VISIBLE else View.GONE
-
             skeletonEventName.visibility = if (showSkeleton) View.VISIBLE else View.GONE
 
             balanceText.visibility = View.VISIBLE
@@ -209,9 +183,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
             rewardsRecycler.visibility = View.GONE
             layoutRewardsSkeleton.visibility = if (showSkeleton) View.VISIBLE else View.GONE
         } else {
-            layoutDropdownContent.visibility = View.VISIBLE
-            skeletonDropdown.visibility = View.GONE
-
             skeletonEventName.visibility = View.GONE
 
             balanceText.visibility = View.VISIBLE
@@ -236,9 +207,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         emptyEventsText.visibility = View.GONE
         emptyRewardsText.visibility = View.GONE
 
-        layoutDropdownContent.visibility = View.VISIBLE
-        skeletonDropdown.visibility = View.GONE
-
         skeletonEventName.visibility = View.GONE
 
         balanceText.visibility = View.VISIBLE
@@ -260,9 +228,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         errorText.visibility = View.GONE
         retryButton.visibility = View.GONE
         rewardsBalanceCard.visibility = View.VISIBLE
-
-        layoutDropdownContent.visibility = View.VISIBLE
-        skeletonDropdown.visibility = View.GONE
 
         skeletonEventName.visibility = View.GONE
 
@@ -328,8 +293,8 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         } == true
 
         val showSkeleton = !swipeRefresh.isRefreshing && !cacheSaysNoRegistrations
-        layoutDropdownContent.visibility = if (showSkeleton) View.GONE else View.VISIBLE
-        skeletonDropdown.visibility = if (showSkeleton) View.VISIBLE else View.GONE
+        // The picker precedes this load: it shows its own loading copy until the events answer.
+        eventPicker.setLoading(true)
         skeletonEventName.visibility = if (showSkeleton) View.VISIBLE else View.GONE
         balanceText.visibility = View.VISIBLE
         layoutRewardsSkeleton.visibility = if (showSkeleton) View.VISIBLE else View.GONE
@@ -339,7 +304,6 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         if (cacheSaysNoRegistrations) {
             swipeRefresh.isRefreshing = false
             selectedEventId = null
-            selectedEventTitle = ""
             emptyEventsText.visibility = View.VISIBLE
             claimsAction.visibility = View.GONE
         }
@@ -347,7 +311,7 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         lifecycleScope.launch {
             when (val registrationsResult = repository.getMyRegistrations()) {
                 is NetworkResult.Success -> {
-                    val options = registrationsResult.data
+                    val loaded = registrationsResult.data
                         .filter { it.status != RegistrationStatus.CANCELLED && it.status != RegistrationStatus.NO_SHOW }
                         .sortedByDescending { it.registeredAt ?: Instant.EPOCH }
                         .distinctBy { it.eventId }
@@ -355,16 +319,17 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
                             val eventId = registration.eventId.toString().takeIf { it.isNotBlank() }
                             val title = registration.eventTitle?.takeIf { it.isNotBlank() }
                                 ?: registration.eventId.toString()
-                            if (eventId == null) null else RegisteredEventOption(eventId, title)
+                            // The old dropdown row carried the title alone: no meta line to keep.
+                            if (eventId == null) null else EventPickerOption(id = eventId, title = title)
                         }
 
                     eventOptions.clear()
-                    eventOptions.addAll(options)
+                    eventOptions.addAll(loaded)
 
                     if (eventOptions.isEmpty()) {
                         swipeRefresh.isRefreshing = false
                         selectedEventId = null
-                        selectedEventTitle = ""
+                        eventPicker.setOptions(emptyList(), null)
                         emptyEventsText.visibility = View.VISIBLE
                         layoutRewardsContent.visibility = View.GONE
                         claimsAction.visibility = View.GONE
@@ -375,32 +340,27 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
                     claimsAction.visibility = View.VISIBLE
                     emptyEventsText.visibility = View.GONE
 
-                    val spinnerAdapter = ArrayAdapter(
-                        this@AttendeeRewardsActivity,
-                        android.R.layout.simple_spinner_item,
-                        eventOptions.map { it.title },
-                    ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-                    eventSpinner.adapter = spinnerAdapter
-
                     val initialIndex = resolveRewardsEventIndex(
-                        eventOptions.map { it.eventId },
+                        eventOptions.map { it.id },
                         preferredEventId,
                         requestedEventId = intent.getStringExtra(EXTRA_EVENT_ID),
                     )
                     if (initialIndex == null) {
                         // An explicit event was requested but the attendee has no live registration for
-                        // it: never fall back to another event's rewards and balance.
+                        // it: never fall back to another event's rewards and balance. The field keeps
+                        // every option and shows no selection.
+                        eventPicker.setOptions(eventOptions, null)
                         showNotRegisteredEventState()
                         return@launch
                     }
 
-                    eventSpinner.setSelection(initialIndex, false)
-                    bindSelectedEventHeader()
                     loadSelectedEventRewards(eventOptions[initialIndex])
                 }
 
                 is NetworkResult.Error -> {
                     swipeRefresh.isRefreshing = false
+                    // A failed fetch must not leave the field on its loading copy.
+                    eventPicker.setOptions(eventOptions, selectedEventId)
                     showError(
                         registrationsResult.message.ifBlank {
                             getString(R.string.ui_attendee_registered_events_load_failed)
@@ -413,83 +373,15 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         }
     }
 
-    private fun bindSelectedEventHeader() {
-        val option = eventOptions.getOrNull(eventSpinner.selectedItemPosition)
-        txtSelectedEventTitle.text = option?.title ?: getString(R.string.common_select_event)
-    }
-
-    private fun renderEventDropdown() {
-        eventPopup?.dismiss()
-        eventPopup = PopupWindow(buildEventDropdownView(), cardSelectedEvent.width.takeIf { it > 0 } ?: ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
-            isOutsideTouchable = true
-            elevation = dimenOffset(R.dimen.elevation_overlay).toFloat()
-            setBackgroundDrawable(ColorDrawable(color(R.color.transparent)))
-            setOnDismissListener { isEventDropdownOpen = false; normalizeChevron(spinnerArrow, false) }
-        }
-    }
-
-    private fun buildEventDropdownView(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundResource(R.drawable.bg_card)
-        eventOptions.forEachIndexed { index, option ->
-            addView(LinearLayout(this@AttendeeRewardsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(
-                    dimenOffset(R.dimen.space_lg), dimenOffset(R.dimen.space_14),
-                    dimenOffset(R.dimen.space_lg), dimenOffset(R.dimen.space_14),
-                )
-                setBackgroundColor(if (index == eventSpinner.selectedItemPosition) color(R.color.accent_container) else color(R.color.surface))
-                setOnClickListener {
-                    eventSpinner.setSelection(index, false)
-                    bindSelectedEventHeader()
-                    renderEventDropdown()
-                    setEventDropdownOpen(false)
-                    loadSelectedEventRewards(eventOptions[index])
-                }
-                addView(TextView(this@AttendeeRewardsActivity).apply {
-                    text = option.title
-                    setTextColor(if (index == eventSpinner.selectedItemPosition) color(R.color.primary) else color(R.color.text_primary))
-                    setTextSizeRes(R.dimen.type_body)
-                    strong()
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                })
-            })
-        }
-    }
-
-    private fun setEventDropdownOpen(open: Boolean) {
-        if (open && eventOptions.isEmpty()) return
-        if (open) {
-            if (eventPopup == null || cardSelectedEvent.width > 0 && eventPopup?.width != cardSelectedEvent.width) renderEventDropdown()
-            isEventDropdownOpen = true
-            normalizeChevron(spinnerArrow, true)
-            eventPopup?.showAsDropDown(cardSelectedEvent, 0, 0)
-        } else {
-            eventPopup?.dismiss()
-            isEventDropdownOpen = false
-            normalizeChevron(spinnerArrow, false)
-        }
-    }
-
-    private fun normalizeChevron(view: View, open: Boolean) {
-        if (view is ImageView) {
-            view.rotation = if (open) 180f else 0f
-        }
-    }
-
     /**
      * Explicit event id with no live registration for it: no balance, rewards or claims for that
-     * event, but the event selector stays usable so the attendee can open one they are registered
+     * event, but the event picker stays usable so the attendee can open one they are registered
      * for. Never picks another event on its own.
      */
     private fun showNotRegisteredEventState() {
         swipeRefresh.isRefreshing = false
         selectedEventId = null
-        selectedEventTitle = ""
         layoutRewardsContent.visibility = View.VISIBLE
-        layoutDropdownContent.visibility = View.VISIBLE
-        skeletonDropdown.visibility = View.GONE
         skeletonEventName.visibility = View.GONE
         layoutRewardsSkeleton.visibility = View.GONE
         emptyEventsText.visibility = View.GONE
@@ -500,20 +392,23 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         claimsAction.visibility = View.GONE
         findViewById<View>(R.id.chipAvailable).visibility = View.GONE
         findViewById<View>(R.id.txtRewardsHistory).visibility = View.GONE
-        txtSelectedEventTitle.text = getString(R.string.common_select_event)
         emptyNotRegisteredText.visibility = View.VISIBLE
     }
 
-    private fun loadSelectedEventRewards(option: RegisteredEventOption) {
-        selectedEventId = option.eventId
-        selectedEventTitle = option.title
+    /**
+     * One path for every event on screen: it owns the selection, keeps the picker's options and
+     * current id in step (the single place both change) and asks the presenter for that event.
+     */
+    private fun loadSelectedEventRewards(option: EventPickerOption) {
+        selectedEventId = option.id
+        eventPicker.setOptions(eventOptions, option.id)
         skeletonEventName.visibility = View.GONE
         emptyNotRegisteredText.visibility = View.GONE
         rewardsSectionTitle.visibility = View.VISIBLE
         claimsAction.visibility = View.VISIBLE
         findViewById<View>(R.id.chipAvailable).visibility = View.VISIBLE
         findViewById<View>(R.id.txtRewardsHistory).visibility = View.VISIBLE
-        presenter.load(option.eventId, attendeeUserId)
+        presenter.load(option.id, attendeeUserId)
     }
 
 }

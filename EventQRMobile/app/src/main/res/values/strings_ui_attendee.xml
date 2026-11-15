@@ -32,7 +32,8 @@
     <string name="ui_attendee_quick_history">History</string>
     <string name="ui_attendee_quick_request">Request</string>
     <string name="ui_attendee_quick_passes">My passes</string>
-    <!-- Pass head title on the registered-events screen. -->
+    <!-- Pass head title on the registered-events screen, and the Profile ACTIVITY row that opens
+         it: the row label is the destination's own name, as the other ACTIVITY rows are. -->
     <string name="ui_attendee_my_passes">My passes</string>
     <string name="ui_attendee_rewards">Rewards</string>
     <string name="ui_attendee_dashboard_empty_next">No upcoming events</string>
@@ -77,11 +78,9 @@
     <string name="ui_attendee_date_tbd">Date to be announced</string>
     <string name="ui_attendee_date">Date</string>
     <string name="ui_attendee_status">Status</string>
-    <string name="ui_attendee_event_time">Event time</string>
     <string name="ui_attendee_venue">Location</string>
     <string name="ui_attendee_category">Category</string>
     <string name="ui_attendee_audience">Audience</string>
-    <string name="ui_attendee_registration_window">Registration window</string>
     <string name="ui_attendee_capacity">Capacity</string>
     <string name="ui_attendee_event_rewards">Rewards</string>
     <!-- The REWARDS row's value: a read-only indicator, never a link. -->
@@ -163,11 +162,11 @@
     <string name="ui_attendee_claimed_rewards">Claimed rewards</string>
     <string name="ui_attendee_my_event_requests">My event requests</string>
     <string name="ui_attendee_profile_meta_history">Points earned and spent</string>
+    <string name="ui_attendee_profile_meta_passes">Events you registered for</string>
     <string name="ui_attendee_profile_meta_rewards">Rewards you redeemed</string>
     <string name="ui_attendee_profile_meta_requests">Status of your requests</string>
     <!-- Edit profile's meta when the account has no phone number: the row always keeps one line. -->
     <string name="ui_attendee_profile_meta_edit">Name and phone number</string>
-    <string name="ui_attendee_version">Version %1$s (%2$d)</string>
     <!-- Shown when the profile request fails without its own message. -->
     <string name="ui_attendee_profile_load_failed">Couldn\'t load your profile.</string>
     <string name="ui_attendee_change_password">Change password</string>

@@ -48,9 +48,8 @@
     <!-- Event details, read-only (6.4) -->
     <string name="ui_organizer_event_details_title">Event details</string>
     <string name="ui_organizer_venue">Location</string>
-    <string name="ui_organizer_registration_window">Registration window</string>
-    <string name="ui_organizer_event_time">Event time</string>
-    <!-- Same-day EVENT TIME: date once, then the start and end times. -->
+    <!-- Same-day SCHEDULE: date once, then the start and end times. The label and the range rows'
+         wording are the shared `common_event_schedule` / `common_event_registration` (7.7). -->
     <string name="ui_organizer_event_time_same_day">%1$s, %2$s –&#160;%3$s</string>
     <string name="ui_organizer_organizer">Organizer</string>
     <string name="ui_organizer_coorganizers">Co-organizers</string>
@@ -69,7 +68,6 @@
     <string name="ui_organizer_edit_label_title">Title</string>
     <string name="ui_organizer_edit_label_capacity">Capacity</string>
     <string name="ui_organizer_edit_label_description">Description</string>
-    <string name="ui_organizer_edit_event_dates">Event dates</string>
     <string name="ui_organizer_edit_locked_note">Dates are set when the event is created and can\'t be changed here.</string>
     <string name="ui_organizer_edit_title_required">Enter a title.</string>
     <string name="ui_organizer_edit_capacity_helper">At least the number already registered.</string>

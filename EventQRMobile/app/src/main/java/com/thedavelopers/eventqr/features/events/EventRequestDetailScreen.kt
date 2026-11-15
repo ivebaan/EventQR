@@ -1,5 +1,8 @@
 package com.thedavelopers.eventqr.features.events
 
+import android.content.Context
+import android.view.LayoutInflater
+import android.widget.TextView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -49,8 +53,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.dto.EventRequestStatus
+import com.thedavelopers.eventqr.core.format.formatEventTime
+import com.thedavelopers.eventqr.core.format.formatRegistrationWindow
 import com.thedavelopers.eventqr.core.util.DateFormatters
 import com.thedavelopers.eventqr.features.events.model.dto.EventRequestResponse
 import com.thedavelopers.eventqr.ui.components.EmptyState
@@ -97,6 +104,26 @@ internal fun requesterDisplay(
 }
 
 /**
+ * The request's EVENT TIME value (§6.5), through the one shared formatter the attendee event detail
+ * and the organizer event details already read, so the same two instants print the same string on
+ * all three screens. No start returns null, so the caller hides the row with its hairline.
+ */
+internal fun eventRequestTime(context: Context, request: EventRequestResponse): String? =
+    formatEventTime(context, request.startDateTime, request.endDateTime)
+
+/**
+ * The request's REGISTRATION WINDOW value (§6.5), same helper as the other two event details: both
+ * ends as full datetimes, `event_detail_date_range` breaking after the start. No end at all returns
+ * null, so the row and its hairline are hidden.
+ */
+internal fun eventRequestRegistrationWindow(context: Context, request: EventRequestResponse): String? =
+    formatRegistrationWindow(
+        context,
+        request.registrationStartDateTime,
+        request.registrationEndDateTime,
+    )
+
+/**
  * Event request detail (§6.5), shared by admin and attendee.
  *
  * The host activity owns the top bar (§5.8) through `setContentWithDetailHeader`, so this screen
@@ -120,6 +147,7 @@ fun EventRequestDetailScreen(
 ) {
     val grid = LocalGrid.current
     val type = LocalType.current
+    val context = LocalContext.current
     var showConfirmDialog by remember { mutableStateOf<ConfirmAction?>(null) }
     var remarksText by rememberSaveable { mutableStateOf("") }
     // A decision in flight locks both controls: one request, one verdict, no double submit. A pull
@@ -219,27 +247,19 @@ fun EventRequestDetailScreen(
 
                     // ── Description ──
                     SectionEyebrow(stringResource(R.string.ui_request_detail_description))
-                    Text(
+                    JustifiedBody(
                         text = request.eventDescription?.takeIf { it.isNotBlank() }
                             ?: stringResource(R.string.ui_request_detail_no_description),
-                        style = type.body,
-                        color = UiTextPrimary,
                     )
 
-                    // ── The spec table: every row is label + value + hairline ──
-                    SectionEyebrow(stringResource(R.string.ui_request_detail_duration))
-                    SpecRow(
-                        label = stringResource(R.string.ui_request_detail_duration),
-                        value = listOf(request.startDateTime, request.endDateTime)
-                            .joinToString(" – ") { it?.let(DateFormatters::formatEventDateTime) ?: "—" },
-                        showLabel = false,
-                    )
-                    if (request.registrationStartDateTime != null || request.registrationEndDateTime != null) {
-                        SpecRow(
-                            label = stringResource(R.string.ui_request_detail_registration),
-                            value = listOf(request.registrationStartDateTime, request.registrationEndDateTime)
-                                .joinToString(" – ") { it?.let(DateFormatters::formatEventDateTime) ?: "—" },
-                        )
+                    // ── The spec table: every row is label + value + hairline. Both ranges read the
+                    // one shared formatter (§6.2, §6.4), so the same instants print the same value
+                    // here as on the attendee event detail and the organizer event details. ──
+                    eventRequestTime(context, request)?.let { value ->
+                        SpecRow(label = stringResource(R.string.common_event_schedule), value = value)
+                    }
+                    eventRequestRegistrationWindow(context, request)?.let { value ->
+                        SpecRow(label = stringResource(R.string.common_event_registration), value = value)
                     }
                     request.eventCategory?.takeIf { it.isNotBlank() }?.let { category ->
                         SpecRow(label = stringResource(R.string.ui_request_detail_category), value = category)
@@ -447,17 +467,37 @@ private fun SectionEyebrow(text: String) {
 @Composable
 private fun ReasonBlock(reason: String?) {
     if (reason.isNullOrBlank()) return
-    val type = LocalType.current
     SectionEyebrow(stringResource(R.string.ui_request_detail_reason))
-    Text(text = reason, style = type.body, color = UiTextPrimary)
+    JustifiedBody(text = reason)
+}
+
+/**
+ * A prose body with real inter-word justification (§6.5). Compose `Text` has no justification, and
+ * faking it word by word would break selection, `fontScale` reflow and RTL, so the body is the
+ * platform TextView the rest of the app already uses for the `body` role
+ * (`res/layout/ui_justified_body.xml`, `TextAppearance.EventQR.Type.Body`, start aligned).
+ * `justificationMode` is `inter_word` there, which is API 26 - this build's `minSdk` - and a
+ * platform that ignored it would fall back to the start edge, never to a broken layout.
+ */
+@Composable
+private fun JustifiedBody(text: String) {
+    AndroidView(
+        factory = { context ->
+            LayoutInflater.from(context).inflate(R.layout.ui_justified_body, null) as TextView
+        },
+        update = { view -> view.text = text },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
  * One spec-table row (§6.5 / §5.9 form 2): label left, value right, hairline underneath. The row is
- * a minimum height, not a fixed one, so a long value or a large font scale wraps and grows.
+ * a minimum height, not a fixed one, so a long value or a large font scale wraps and grows. The label
+ * hugs its own text and the value takes the rest of the row - the attendee event detail's geometry -
+ * because a 50/50 split forces a full `12 Oct 2026, 9:41 AM` line to break inside the timestamp.
  */
 @Composable
-private fun SpecRow(label: String, value: String, showLabel: Boolean = true) {
+private fun SpecRow(label: String, value: String) {
     val grid = LocalGrid.current
     val type = LocalType.current
     Column(
@@ -472,18 +512,13 @@ private fun SpecRow(label: String, value: String, showLabel: Boolean = true) {
                 .padding(vertical = grid.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (showLabel) {
-                Text(
-                    text = label,
-                    style = type.overline,
-                    color = UiTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
-            }
+            Text(
+                text = label,
+                style = type.overline,
+                color = UiTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 text = value,
                 style = type.numericS,

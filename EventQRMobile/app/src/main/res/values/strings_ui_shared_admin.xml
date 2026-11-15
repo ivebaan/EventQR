@@ -72,6 +72,18 @@
     <string name="ui_admin_accounts_delete">Delete</string>
     <string name="ui_admin_accounts_deleted">Account deleted</string>
     <string name="ui_admin_accounts_self_delete">You can\'t delete your own account.</string>
+    <string name="ui_admin_accounts_disable">Disable account</string>
+    <string name="ui_admin_accounts_disable_title">Disable account?</string>
+    <string name="ui_admin_accounts_disable_body">%1$s is signed out now and can\'t sign in again until you enable the account. Their registrations stay.</string>
+    <string name="ui_admin_accounts_keep_active">Keep active</string>
+    <string name="ui_admin_accounts_disabled">Account disabled</string>
+    <string name="ui_admin_accounts_self_disable">You can\'t disable your own account.</string>
+    <string name="ui_admin_accounts_enable">Enable account</string>
+    <string name="ui_admin_accounts_enable_title">Enable account?</string>
+    <string name="ui_admin_accounts_enable_body">%1$s can sign in and use EventQR again.</string>
+    <string name="ui_admin_accounts_keep_disabled">Keep disabled</string>
+    <string name="ui_admin_accounts_enabled">Account enabled</string>
+    <string name="ui_admin_accounts_self_enable">You can\'t enable your own account.</string>
     <string name="ui_admin_role_attendee">Attendee</string>
     <string name="ui_admin_role_staff">Staff</string>
     <string name="ui_admin_role_organizer">Organizer</string>
@@ -137,8 +149,6 @@
     <string name="ui_request_detail_error_title">Couldn\'t load request</string>
     <string name="ui_request_detail_unknown_requester">Unknown requester</string>
     <string name="ui_request_detail_description">Description</string>
-    <string name="ui_request_detail_duration">Duration</string>
-    <string name="ui_request_detail_registration">Registration window</string>
     <string name="ui_request_detail_category">Category</string>
     <string name="ui_request_detail_audience">Audience</string>
     <string name="ui_request_detail_venue">Location</string>
