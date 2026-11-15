@@ -10,6 +10,7 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -54,8 +55,9 @@ internal fun filterEventOptions(options: List<EventPickerOption>, query: String)
 /**
  * Searchable event selector shared by the organizer Attendees, Reports and Rewards pages
  * (plan 5.2 "Event picker"). One focusable node - the text input - carries the query and the
- * accessibility contract; a tap clears the query, focuses the field and raises the keyboard with
- * the full list dropped under it, typing filters, and the hint keeps naming the chosen event.
+ * accessibility contract; any tap or focus gain clears the query, raises the keyboard and drops
+ * the full list under it, typing filters, and the hint keeps naming the chosen event. The chosen
+ * title only returns to the text when the user leaves without choosing (v1.58).
  */
 class EventPickerField @JvmOverloads constructor(
     context: Context,
@@ -74,9 +76,17 @@ class EventPickerField @JvmOverloads constructor(
     private var loading = false
     private var programmatic = false
     private var selecting = false
+    /** True from the first keystroke until the query is submitted or reverted (v1.58). */
+    private var userEdited = false
+    /**
+     * Set by a revert: the window can hand focus straight back to the input afterwards (it is often
+     * the only focusable view), and that gain must not read as a fresh search (v1.58).
+     */
+    private var awaitingUserGesture = false
     private var onSelected: ((String) -> Unit)? = null
     private var announceRunnable: Runnable? = null
     private var appliedDropDownHeight = -1
+    private val dismissExitCheck = Runnable { onPopupDismissedForGood() }
 
     init {
         orientation = HORIZONTAL
@@ -119,6 +129,8 @@ class EventPickerField @JvmOverloads constructor(
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 if (programmatic) return
+                userEdited = true
+                awaitingUserGesture = false
                 renderTrailing()
                 meta.visibility = View.GONE
                 // Filter synchronously so the popup never shows a stale list while the framework's
@@ -136,18 +148,35 @@ class EventPickerField @JvmOverloads constructor(
         input.onFocusChangeListener = OnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
                 meta.visibility = View.GONE
-                if (!loading) openList()
+                // A focus the user asked for starts a fresh search; the focus the window hands back
+                // straight after a revert leaves the field at rest on the title (v1.58).
+                if (!loading) {
+                    if (awaitingUserGesture) awaitingUserGesture = false else openForSearch()
+                }
             } else {
                 dismissList()
                 revertText()
             }
         }
 
+        input.onUserGesture = { awaitingUserGesture = false }
+
         input.setOnClickListener {
             if (!isEnabled || loading) return@setOnClickListener
             // A tap inside a query in progress keeps the query: only a fresh open starts empty.
             if (input.isPopupShowing && hasQuery()) return@setOnClickListener
             openForSearch()
+        }
+
+        input.onBack = {
+            if (!input.isPopupShowing && !hasQuery()) {
+                false
+            } else {
+                revertText()
+                dismissList()
+                hideKeyboard()
+                true
+            }
         }
 
         input.setOnItemClickListener(AdapterView.OnItemClickListener { _, _, position, _ ->
@@ -165,7 +194,12 @@ class EventPickerField @JvmOverloads constructor(
         }
 
         input.setOnDismissListener {
-            if (!selecting) revertText()
+            // The popup also dismisses and re-shows itself whenever it refits (IME insets, a filter
+            // shrinking the list), so a dismissal alone is not an exit: check once the pass is done
+            // and only react if the list really stayed closed under a live query (v1.58).
+            if (selecting || !isAttachedToWindow) return@setOnDismissListener
+            removeCallbacks(dismissExitCheck)
+            post(dismissExitCheck)
         }
 
         trailing.setOnClickListener {
@@ -208,10 +242,16 @@ class EventPickerField @JvmOverloads constructor(
         val selected = options.firstOrNull { it.id == this.selectedId }
         selectedTitle = selected?.title
         adapter.setOptions(options, this.selectedId)
+        // A host may reload while the user is typing: the query wins, never the chosen title.
+        if (input.hasFocus() && userEdited) {
+            adapter.applyQuery(input.text?.toString().orEmpty())
+        } else {
+            userEdited = false
+            programmatic = true
+            input.setText(selected?.title.orEmpty(), false)
+            programmatic = false
+        }
         setLoading(false)
-        programmatic = true
-        input.setText(selected?.title.orEmpty(), false)
-        programmatic = false
         applyHint()
         meta.text = selected?.meta.orEmpty()
         meta.visibility = if (selected?.meta.isNullOrBlank() || input.hasFocus()) View.GONE else View.VISIBLE
@@ -223,6 +263,7 @@ class EventPickerField @JvmOverloads constructor(
     fun setLoading(isLoading: Boolean) {
         loading = isLoading
         if (isLoading) {
+            userEdited = false
             input.isEnabled = false
             programmatic = true
             input.setText(context.getString(R.string.ui_event_picker_loading), false)
@@ -259,6 +300,7 @@ class EventPickerField @JvmOverloads constructor(
         ViewCompat.setOnApplyWindowInsetsListener(this, null)
         announceRunnable?.let { removeCallbacks(it) }
         announceRunnable = null
+        removeCallbacks(dismissExitCheck)
         super.onDetachedFromWindow()
     }
 
@@ -267,10 +309,8 @@ class EventPickerField @JvmOverloads constructor(
         return super.onSaveInstanceState()
     }
 
-    private fun hasQuery(): Boolean {
-        val text = input.text?.toString().orEmpty()
-        return text.isNotEmpty() && text != selectedTitle
-    }
+    /** True only for text the user typed and has not chosen or left behind (v1.58). */
+    private fun hasQuery(): Boolean = userEdited && input.text?.isNotEmpty() == true
 
     private fun renderTrailing() {
         if (loading) {
@@ -300,13 +340,14 @@ class EventPickerField @JvmOverloads constructor(
     private fun openForSearch() {
         if (!isEnabled || loading) return
         clearQuery()
-        input.requestFocus()
+        if (!input.hasFocus()) input.requestFocus()
         showKeyboard()
         openList()
     }
 
     /** Empties a query with no filter, announce or meta side effect, and restores the full list. */
     private fun clearQuery() {
+        userEdited = false
         programmatic = true
         input.setText("", false)
         programmatic = false
@@ -345,6 +386,7 @@ class EventPickerField @JvmOverloads constructor(
 
     private fun select(option: EventPickerOption) {
         selecting = true
+        userEdited = false
         selectedId = option.id
         selectedTitle = option.title
         adapter.setOptions(options, selectedId)
@@ -359,13 +401,30 @@ class EventPickerField @JvmOverloads constructor(
         hideKeyboard()
         dismissList()
         selecting = false
+        // Focus stays on the input on purpose: clearFocus() hands it straight back to the only
+        // focusable view on a short screen, and that gain would open a search over the new
+        // selection. The next tap clears through the click path anyway (v1.58).
         // The host may rebuild its whole tree: run after the popup has gone.
         post { onSelected?.invoke(option.id) }
+    }
+
+    /**
+     * A dismissal that outlived its own pass - the popup refits and re-shows within one pass, so
+     * only a list that stayed closed counts. If the field kept focus it would sit on a half-typed
+     * query with no list: put the query back to the chosen title (v1.58).
+     */
+    private fun onPopupDismissedForGood() {
+        if (selecting || !isAttachedToWindow || !input.isEnabled) return
+        if (input.isPopupShowing || !input.hasFocus() || !hasQuery()) return
+        hideKeyboard()
+        revertText()
     }
 
     /** Reverts an unsubmitted query to the selected event's name; never auto-selects. */
     private fun revertText() {
         if (loading) return
+        userEdited = false
+        awaitingUserGesture = true
         programmatic = true
         input.setText(selectedTitle.orEmpty(), false)
         programmatic = false
@@ -466,7 +525,29 @@ class EventPickerInput @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = android.R.attr.autoCompleteTextViewStyle,
 ) : AppCompatAutoCompleteTextView(context, attrs, defStyleAttr) {
+
+    /** Back before the IME sees it: the picker reverts a live query instead of closing alone. */
+    var onBack: (() -> Boolean)? = null
+
+    /** The user's own touch or key, as opposed to focus the window hands back on its own. */
+    var onUserGesture: (() -> Unit)? = null
+
     override fun enoughToFilter(): Boolean = true
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) onUserGesture?.invoke()
+        return super.onTouchEvent(event)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        onUserGesture?.invoke()
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && onBack?.invoke() == true) return true
+        return super.onKeyPreIme(keyCode, event)
+    }
 
     // The picker's select() writes the text itself; a framework write here would re-filter
     // the list before the click listener resolves the tapped row.

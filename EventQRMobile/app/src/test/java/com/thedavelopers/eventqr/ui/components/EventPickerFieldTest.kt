@@ -3,6 +3,7 @@ package com.thedavelopers.eventqr.ui.components
 import android.app.Activity
 import android.os.Looper
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -17,6 +18,8 @@ import android.widget.ListPopupWindow
 import android.widget.ListView
 import android.widget.TextView
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.graphics.Insets
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.thedavelopers.eventqr.R
@@ -374,6 +377,141 @@ class EventPickerFieldTest {
         ViewCompat.onInitializeAccessibilityNodeInfo(row, info)
         assertEquals("android.widget.Button", info.className.toString())
         info.recycle()
+    }
+
+    /**
+     * What the IME does when it slides in: the host's insets change, the popup refits in place and
+     * the framework may dismiss and re-show it. The query and the text must survive (v1.58).
+     */
+    private fun dispatchImeInsets(bottom: Int = 800) {
+        val insets = WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, bottom))
+            .build()
+        ViewCompat.dispatchApplyWindowInsets(picker, insets)
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /** The popup's own dismiss + re-show, the cycle the framework runs for a refit (v1.58). */
+    private fun refitPopupLikeTheFramework() {
+        popupField.dismiss()
+        input.showDropDown()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /** Moves focus off the field the way a user leaving it does: a real, different focus stop. */
+    private fun focusElsewhere() {
+        val other = View(activity).apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
+        (picker.parent as ViewGroup).addView(other)
+        other.requestFocus()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test
+    fun firstTapAfterASelection_clearsTheTitle_andNothingPutsItBack() {
+        open()
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("Day Fair", input.text.toString())
+        // The host re-feeds its data and the field is left at rest, holding the chosen title.
+        focusElsewhere()
+        assertEquals("Day Fair", input.text.toString())
+
+        input.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("", input.text.toString())
+        assertEquals("Day Fair", input.hint.toString())
+        assertEquals(options.size, adapter().count)
+
+        // The list refits under the arriving IME: the chosen title must not come back.
+        refitPopupLikeTheFramework()
+        assertEquals("", input.text.toString())
+        assertEquals(options.size, adapter().count)
+    }
+
+    @Test
+    fun focusGainAlone_clearsTheTitle_andOpensTheFullList() {
+        // The harness window is not in touch mode, so the input already holds a focus gain; the
+        // gain must still have left an empty field over the full list (v1.58).
+        picker.setOptions(options, "1")
+        shadowOf(Looper.getMainLooper()).idle()
+        input.requestFocus()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(input.isPopupShowing)
+        assertEquals("", input.text.toString())
+        assertEquals("Night Market", input.hint.toString())
+        assertEquals(options.size, adapter().count)
+    }
+
+    @Test
+    fun typingSurvivesTheImesRefit_andIsNeverReplacedByTheTitle() {
+        val many = listOf(EventPickerOption("1", "Night Market", "12 Nov 2026")) +
+            (2..8).map { EventPickerOption("$it", "Gala $it", "1$it Nov 2026") }
+        picker.setOptions(many, "1")
+        shadowOf(Looper.getMainLooper()).idle()
+        input.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        dispatchImeInsets()
+        input.setText("ate")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("ate", input.text.toString())
+        assertEquals(1, adapter().count)
+
+        refitPopupLikeTheFramework()
+
+        assertEquals("the typed query must survive the refit", "ate", input.text.toString())
+        assertEquals(1, adapter().count)
+    }
+
+    @Test
+    fun focusLoss_revertsToTheChosenTitle() {
+        open()
+        input.setText("ate")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        focusElsewhere()
+
+        assertEquals("Night Market", input.text.toString())
+        assertEquals("Night Market", input.hint.toString())
+        assertFalse(input.isPopupShowing)
+    }
+
+    @Test
+    fun selectARow_thenTapAgain_textIsEmpty_andTheListIsFull() {
+        var selected: String? = null
+        picker.setOnEventSelectedListener { selected = it }
+        open()
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("2", selected)
+
+        input.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("", input.text.toString())
+        assertEquals("Day Fair", input.hint.toString())
+        assertEquals(options.size, adapter().count)
+        assertEquals("Night Market", (adapter().getItem(0) as EventPickerOption).title)
+    }
+
+    @Test
+    fun backWithAQuery_revertsAndClosesTheList() {
+        open()
+        input.setText("zzz")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val back = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
+        val consumed = input.onKeyPreIme(KeyEvent.KEYCODE_BACK, back)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue("the picker must consume Back while a query is live", consumed)
+        assertEquals("Night Market", input.text.toString())
+        assertFalse(input.isPopupShowing)
     }
 
     @Test
