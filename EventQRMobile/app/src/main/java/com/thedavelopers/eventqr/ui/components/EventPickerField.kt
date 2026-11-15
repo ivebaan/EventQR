@@ -451,7 +451,9 @@ class EventPickerField @JvmOverloads constructor(
      */
     private fun onPopupDismissedForGood() {
         if (selecting || !isAttachedToWindow || !input.isEnabled) return
-        if (input.isPopupShowing || !input.hasFocus() || !hasQuery()) return
+        // Also an opened-but-untyped search (empty field, hint + caret): pressing away must put the
+        // title back and take the caret away, not just a half-typed query (v1.66).
+        if (input.isPopupShowing || !input.hasFocus() || atRest) return
         hideKeyboard()
         revertText()
         settleAtRest()

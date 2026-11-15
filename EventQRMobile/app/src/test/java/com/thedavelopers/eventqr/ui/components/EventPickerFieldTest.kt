@@ -638,4 +638,19 @@ class EventPickerFieldTest {
         assertFalse("an outside-tap revert must take the focus out of the input", input.hasFocus())
         assertTrue("the field must keep the focus", focusSink().isFocused())
     }
+
+    /** Opened (field cleared), nothing typed, tapped away: the title is back and the caret is gone. */
+    @Test
+    fun outsideTapAfterOpeningWithoutTyping_restoresTheTitleAndDropsTheCaret() {
+        open()
+        assertEquals("", input.text.toString())
+
+        popupField.dismiss()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("Night Market", input.text.toString())
+        assertFalse("no caret on an untyped search that was abandoned", input.isCursorVisible)
+        assertFalse(input.hasFocus())
+        assertTrue(focusSink().isFocused())
+    }
 }

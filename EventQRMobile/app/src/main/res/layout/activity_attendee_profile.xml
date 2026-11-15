@@ -364,6 +364,14 @@
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
 
+                <!-- Flexible gap: on a tall screen (the ScrollView fills the viewport) it pushes
+                     Sign out to the bottom edge; on a short one it collapses to 0 and the
+                     space_32 margin below keeps Sign out in the scroll flow, never clipped. -->
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
                 <!-- Static chrome, outside the skeleton region: Sign out is on screen from the
                      first frame, so it never pops in after the load. -->
                 <TextView
