@@ -156,24 +156,22 @@ class AttendeeProfileScreenTest {
     }
 
     @Test
-    fun activitySection_isOneCardWithFourRowsInOrder() {
+    fun activitySection_isOneCardWithThreeRowsInOrder() {
         val activity = launch()
 
         val card = activity.findViewById<ViewGroup>(R.id.cardActivityMenu)
         val stack = card.getChildAt(0) as ViewGroup
         assertEquals(
-            listOf(R.id.rowMyPasses, R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
+            listOf(R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
             stack.children().map { it.id },
         )
 
         val metaRes = listOf(
-            R.string.ui_attendee_profile_meta_passes,
             R.string.ui_attendee_profile_meta_history,
             R.string.ui_attendee_profile_meta_rewards,
             R.string.ui_attendee_profile_meta_requests,
         )
         val expected = listOf(
-            R.string.ui_attendee_my_passes to AppIcons.Pass,
             R.string.ui_attendee_transaction_history to AppIcons.Logs,
             R.string.ui_attendee_claimed_rewards to AppIcons.Reward,
             R.string.ui_attendee_my_event_requests to AppIcons.Request,
@@ -196,21 +194,22 @@ class AttendeeProfileScreenTest {
                 shadowOf((item.find(R.id.listRowIcon) as ImageView).drawable).createdFromResId,
             )
         }
-        // My passes leads: the dashboard's first chip, and the top-of-mind action.
+        // My passes is the bottom bar's centre item now (§5.7), not a row: one entry point per
+        // destination, and the bar is on screen 64dp below this card.
         assertEquals(
-            "My passes is the first row of the card",
-            activity.getString(R.string.ui_attendee_my_passes),
-            (stack.getChildAt(0).find(R.id.listRowTitle) as TextView).text.toString(),
+            "My passes is not an ACTIVITY row any more",
+            0,
+            activity.resources.getIdentifier("rowMyPasses", "id", activity.packageName),
         )
         // Stock divider: every row but the last one.
-        (0 until 3).forEach { index ->
+        (0 until 2).forEach { index ->
             assertEquals(
                 "row ${index + 1} carries the hairline",
                 View.VISIBLE,
                 stack.getChildAt(index).find(R.id.listRowDivider).visibility,
             )
         }
-        assertEquals(View.GONE, stack.getChildAt(3).find(R.id.listRowDivider).visibility)
+        assertEquals(View.GONE, stack.getChildAt(2).find(R.id.listRowDivider).visibility)
     }
 
     private fun classShape(view: View): List<String> =
@@ -218,17 +217,16 @@ class AttendeeProfileScreenTest {
         else listOf(view.javaClass.name)
 
     /**
-     * The My passes row is not a special case inside its card: it is the same `list_row_icon`
-     * include riding the same card, so it wears the same title style, chevron, 40dp tile, 72dp floor
-     * and 76dp-inset hairline as its siblings. Compared against a sibling inflated on the same
-     * screen, so a hand-built row cannot pass as "close enough".
+     * Every ACTIVITY row is the same `list_row_icon` include riding the same card, so it wears the
+     * same title style, chevron, 40dp tile, 72dp floor and 76dp-inset hairline. Compared against a
+     * sibling inflated on the same screen, so a hand-built row cannot pass as "close enough".
      */
     @Test
-    fun myPassesRow_isTheSameListRowComponentAsItsSiblings() {
+    fun activityRows_areTheSameListRowComponent() {
         val activity = launch()
         render(activity)
 
-        val row = activity.findViewById<View>(R.id.rowMyPasses)
+        val row = activity.findViewById<View>(R.id.rowClaimedRewards)
         val sibling = activity.findViewById<View>(R.id.rowTransactionHistory)
 
         assertEquals(
@@ -362,7 +360,6 @@ class AttendeeProfileScreenTest {
         render(activity)
 
         val rows = listOf(
-            R.id.rowMyPasses,
             R.id.rowTransactionHistory,
             R.id.rowClaimedRewards,
             R.id.rowMyEventRequests,
@@ -471,20 +468,20 @@ class AttendeeProfileScreenTest {
             activity.getString(R.string.ui_skeleton_loading),
             skeleton.contentDescription.toString(),
         )
-        // Two eyebrow bars and the 1 + 4 row stacks, in the loaded order (ACCOUNT first). Each
-        // stack carries the loaded card's hairlines between its rows, so a 4-row stack is rows + 3
+        // Two eyebrow bars and the 1 + 3 row stacks, in the loaded order (ACCOUNT first). Each
+        // stack carries the loaded card's hairlines between its rows, so a 3-row stack is rows + 2
         // dividers.
         assertEquals(4, skeleton.childCount)
         val accountRows = skeleton.getChildAt(1) as ViewGroup
         val activityRows = skeleton.getChildAt(3) as ViewGroup
         assertEquals(1, accountRows.childCount)
-        assertEquals(4 + 3, activityRows.childCount)
+        assertEquals(3 + 2, activityRows.childCount)
 
         val token = activity.resources.getDimensionPixelSize(R.dimen.ui_skeleton_row_height)
         val rowHeight = activity.resources.getDimensionPixelSize(R.dimen.ui_row_height)
         val tile = activity.resources.getDimensionPixelSize(R.dimen.ui_row_tile)
         val skeletonRows = (activityRows.children() + accountRows.children()).filterIsInstance<ViewGroup>()
-        assertEquals("four ACTIVITY rows and one ACCOUNT row", 5, skeletonRows.size)
+        assertEquals("three ACTIVITY rows and one ACCOUNT row", 4, skeletonRows.size)
         skeletonRows.forEach { skeletonRow ->
             assertEquals("every skeleton row is the loaded row height", token, skeletonRow.layoutParams.height)
             assertEquals(
@@ -517,7 +514,7 @@ class AttendeeProfileScreenTest {
 
         // Measured, both surfaces at 360dp wide. A loaded row with its one-line meta lands on 76dp
         // (14 + 26 title + 2 + 20 meta), so each 72dp skeleton row carries one 4dp grid step and the
-        // stack repeats the loaded card's three hairlines: 4 x 72 + 4 x 4 + 3 x 1 = 307dp, the loaded
+        // stack repeats the loaded card's two hairlines: 3 x 72 + 3 x 4 + 2 x 1 = 230dp, the loaded
         // card's height. §5.11 allows 4dp of drift, so the card delta is asserted against that.
         val density = activity.resources.displayMetrics.density
         val width = (360f * density).toInt()
@@ -660,20 +657,25 @@ class AttendeeProfileScreenTest {
         )
     }
 
-    // -- My passes: a row in ACTIVITY, not a strip of chips ----------------------
+    // -- My passes: a bar item, not a row -----------------------------------------
 
     /**
-     * The correction that retired the copied chip strip: Home keeps its three chips, and the
-     * profile reaches the same screen through one ACTIVITY row, in the row language of its
-     * siblings. `btnMyPasses` / `attendeeQuickActions` therefore resolve to nothing on this page.
+     * v1.60: `My passes` is the attendee bar's centre item, so the profile no longer carries a row
+     * (or a strip) for it. One destination, one entry point; the bar is on screen on every tab.
      */
     @Test
-    fun myPasses_isARowInTheActivityCard_andTheQuickActionStripIsGone() {
+    fun myPasses_isNotARowOnProfile() {
         val activity = launch()
 
-        assertNotNull(
-            "My passes lives in the ACTIVITY card",
-            activity.findViewById<View>(R.id.cardActivityMenu).find(R.id.rowMyPasses),
+        assertEquals(
+            "My passes is a bar item now, so the ACTIVITY row is gone",
+            0,
+            activity.resources.getIdentifier("rowMyPasses", "id", activity.packageName),
+        )
+        assertEquals(
+            "and its meta line is deleted with it, not left as dead copy",
+            0,
+            activity.resources.getIdentifier("ui_attendee_profile_meta_passes", "string", activity.packageName),
         )
         assertEquals(
             "the strip's container is not part of this screen",
@@ -690,27 +692,9 @@ class AttendeeProfileScreenTest {
             null,
             activity.findViewById<View>(R.id.eyebrowQuickActions),
         )
-    }
-
-    @Test
-    fun myPassesRow_opensRegisteredEventsThroughTheDashboardChipMapping() {
-        val activity = launch()
-        render(activity)
-
-        assertEquals(
-            "the row and the dashboard chip resolve the same destination",
-            attendeeQuickActionDestination(R.id.btnMyPasses),
-            RegisteredEventsActivity::class.java,
-        )
-
-        activity.findViewById<View>(R.id.rowMyPasses).find(R.id.listRowContainer).performClick()
-        val started = shadowOf(activity).nextStartedActivity
-        assertEquals(
-            "My passes opens the registered-events screen",
-            RegisteredEventsActivity::class.java.name,
-            started.component?.className,
-        )
-        assertEquals("with no extras, exactly like the chip", null, started.extras)
+        // Positive controls: the three remaining ACTIVITY rows and the shared label survive.
+        assertNotNull(activity.findViewById<View>(R.id.rowTransactionHistory))
+        assertTrue(activity.resources.getIdentifier("ui_attendee_my_passes", "string", activity.packageName) != 0)
     }
 
     @Test

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quiet destructive TEXT button (5.1, v1.62): the trigger for a rare destructive row action that
+     opens a confirm. No fill, no boundary, no glyph: the ui_error label is the whole control, and the
+     confirm's DestructiveCommit is the only filled red in the flow.
+
+     Press fills ui_error_container (the same wash the outlined trigger uses), keyboard focus draws the
+     2dp ui_error ring. Nothing paints at rest, so the button reads as a text action beside its
+     Secondary.Inline sibling instead of as a second box. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_error_container" />
+            <corners android:radius="@dimen/ui_radius_button" />
+        </shape>
+    </item>
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <stroke
+                android:width="@dimen/stroke_focus"
+                android:color="@color/ui_error" />
+            <corners android:radius="@dimen/ui_radius_button" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <corners android:radius="@dimen/ui_radius_button" />
+        </shape>
+    </item>
+
+</selector>

@@ -55,7 +55,7 @@ import com.thedavelopers.eventqr.ui.theme.UiTextSecondary
  *   active: icon + label ui_primary, plus a 3dp x 24dp ui_primary bar sitting on the TOP edge of
  *           the item, aligned to the icon centre
  *   inactive: ui_text_secondary
- *   min touch target 48x48, items share the width equally (4 attendee/staff/admin, 5 organizer)
+ *   min touch target 48x48, items share the width equally (4 staff/admin, 5 attendee and organizer)
  *
  * Labels are dropped by measurement, not by a fixed font-scale constant: each label is measured
  * once at the current width and font scale in the label style (micro 11sp/600), and the bar shows
@@ -184,14 +184,18 @@ fun EventQrBottomNavBar(
 }
 
 /**
- * Attendee bar. Four destinations (Home / Events / Rewards / Profile) per §5.7's four-item budget.
- * The old Registered tab is retired: the dashboard's "My passes" quick chip is the entry point to
- * RegisteredEventsActivity, which still binds this bar with no item selected. Keep the ids - they
- * are the navigation keys.
+ * Attendee bar. Five destinations in order - Home / Events / My passes / Rewards / Profile - per
+ * §5.7's five-item rule, with `My passes` third, i.e. the centre slot: RegisteredEventsActivity is
+ * the attendee's own record of what they hold, not a sub-page of Events. The `registered` nav id
+ * stays retired; this is `passes`, and the destination is the registered-events screen itself.
+ * RegisteredEventsActivity binds this bar with `passes` selected, so the bar never goes blank on a
+ * destination it owns. Home keeps its `My passes` quick chip as the second entry point (§6.2).
+ * Keep the ids - they are the navigation keys.
  */
 val AttendeeNavItems = listOf(
     NavItem("home", "Home", AppIcons.Home),
     NavItem("events", "Events", AppIcons.Event),
+    NavItem("passes", "My passes", AppIcons.Pass),
     NavItem("rewards", "Rewards", AppIcons.Reward),
     NavItem("profile", "Profile", AppIcons.Profile),
 )

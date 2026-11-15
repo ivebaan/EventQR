@@ -10,9 +10,9 @@ import com.thedavelopers.eventqr.ui.icons.FieldIcons
  * The attendee quick-action chips (§6.2): the dashboard's own `QUICK ACTIONS` strip, declared in
  * `activity_user_dashboard.xml`. This file owns the behaviour, so the three destinations and the
  * 20dp glyphs are defined once: the dashboard binds its chips through
- * [configureAttendeeQuickActions], and the attendee Profile's `My passes` row resolves the same
- * `R.id.btnMyPasses` entry through [attendeeQuickActionDestination], so the store and the page
- * cannot send the user to two different screens.
+ * [configureAttendeeQuickActions], and the chips resolve their screens through the pure
+ * [attendeeQuickActionDestination]. Home is the strip's only host - the attendee Profile reaches
+ * `My passes` through its own bar item now (§5.7's five-item rule), so no row reads this map.
  */
 internal val attendeeQuickActionChipIds = intArrayOf(
     R.id.btnMyPasses,

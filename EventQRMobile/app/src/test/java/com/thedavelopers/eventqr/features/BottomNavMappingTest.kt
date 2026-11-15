@@ -5,10 +5,13 @@ import com.thedavelopers.eventqr.features.admin.AdminEventApprovalBackendActivit
 import com.thedavelopers.eventqr.features.admin.adminNavDestination
 import com.thedavelopers.eventqr.features.admin.dashboard.AdminDashboardActivity
 import com.thedavelopers.eventqr.features.admin.users.AdminAccountManagementActivity
+import com.thedavelopers.eventqr.features.attendee.AttendeeBottomNavItem
 import com.thedavelopers.eventqr.features.attendee.AttendeeEventsActivity
 import com.thedavelopers.eventqr.features.attendee.AttendeeRewardsActivity
+import com.thedavelopers.eventqr.features.attendee.RegisteredEventsActivity
 import com.thedavelopers.eventqr.features.attendee.attendeeNavDestination
 import com.thedavelopers.eventqr.features.attendee.attendeeTabFlags
+import com.thedavelopers.eventqr.features.attendee.navId
 import com.thedavelopers.eventqr.features.dashboard.DashboardActivity
 import com.thedavelopers.eventqr.features.organizer.attendees.AttendeeManagementActivity
 import com.thedavelopers.eventqr.features.organizer.dashboard.OrganizerDashboardActivity
@@ -52,6 +55,7 @@ class BottomNavMappingTest {
     fun attendeeNavDestination_mapsEveryTab() {
         assertEquals(DashboardActivity::class.java, attendeeNavDestination("home"))
         assertEquals(AttendeeEventsActivity::class.java, attendeeNavDestination("events"))
+        assertEquals(RegisteredEventsActivity::class.java, attendeeNavDestination("passes"))
         assertEquals(AttendeeRewardsActivity::class.java, attendeeNavDestination("rewards"))
         assertEquals(com.thedavelopers.eventqr.features.attendee.AttendeeProfileActivity::class.java, attendeeNavDestination("profile"))
     }
@@ -78,6 +82,7 @@ class BottomNavMappingTest {
     fun attendeeTabFlags_nonHomeTabsReorderToFrontWithoutClearing() {
         listOf(
             AttendeeEventsActivity::class.java,
+            RegisteredEventsActivity::class.java,
             AttendeeRewardsActivity::class.java,
             com.thedavelopers.eventqr.features.attendee.AttendeeProfileActivity::class.java,
         ).forEach { destination ->
@@ -96,15 +101,32 @@ class BottomNavMappingTest {
     }
 
     @Test
-    fun attendeeNavItems_onlyProfileIsUnmapped() {
-        // Profile is a rendered tab but has no destination in the XML-hosted attendee nav.
+    fun attendeeNavItems_everyTabMapsToADestination() {
         AttendeeNavItems.forEach { item ->
-            if (item.id == "profile") {
-                assertNotNull("attendee tab profile must map to destination", attendeeNavDestination(item.id))
-            } else {
-                assertNotNull("attendee tab '${item.id}' must map to a destination", attendeeNavDestination(item.id))
-            }
+            assertNotNull("attendee tab '${item.id}' must map to a destination", attendeeNavDestination(item.id))
         }
+    }
+
+    /**
+     * v1.60: `My passes` is the attendee bar's centre item, so its screen is a tab and binds the bar
+     * with itself selected - not a null selection, which would leave the bar unselected on a
+     * destination the bar owns.
+     */
+    @Test
+    fun registeredEvents_bindsTheBarWithMyPassesSelected() {
+        val item = RegisteredEventsActivity.boundAttendeeNavItem
+
+        assertEquals(AttendeeBottomNavItem.PASSES, item)
+        assertEquals("passes", item.navId)
+        assertEquals(
+            "the selected id must map back to the screen that selects it",
+            RegisteredEventsActivity::class.java,
+            attendeeNavDestination(item.navId),
+        )
+        assertEquals(
+            AttendeeNavItems[2],
+            AttendeeNavItems.single { it.id == item.navId },
+        )
     }
 
     // -- Staff --------------------------------------------------------------------

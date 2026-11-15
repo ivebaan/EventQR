@@ -162,7 +162,6 @@
     <string name="ui_attendee_claimed_rewards">Claimed rewards</string>
     <string name="ui_attendee_my_event_requests">My event requests</string>
     <string name="ui_attendee_profile_meta_history">Points earned and spent</string>
-    <string name="ui_attendee_profile_meta_passes">Events you registered for</string>
     <string name="ui_attendee_profile_meta_rewards">Rewards you redeemed</string>
     <string name="ui_attendee_profile_meta_requests">Status of your requests</string>
     <!-- Edit profile's meta when the account has no phone number: the row always keeps one line. -->

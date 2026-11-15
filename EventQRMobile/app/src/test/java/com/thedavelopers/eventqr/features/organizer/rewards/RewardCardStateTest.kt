@@ -55,11 +55,72 @@ class RewardCardStateTest {
     }
 
     @Test
+    fun claimedFraction_isClampedAndNullWithoutATrack() {
+        assertEquals(0.5f, RewardCardState.of(reward(claimed = 5, total = 10, remaining = 5)).claimedFraction)
+        assertEquals(0f, RewardCardState.of(reward(claimed = 0, total = 10, remaining = 10)).claimedFraction)
+        assertEquals(1f, RewardCardState.of(reward(claimed = 10, total = 10, remaining = 0)).claimedFraction)
+        // Over-claimed (server data drift) still paints a full track, never past 100%.
+        assertEquals(1f, RewardCardState.of(reward(claimed = 14, total = 10, remaining = 0)).claimedFraction)
+        // Unlimited supply and a zero supply have no ratio to draw.
+        assertNull(RewardCardState.of(reward(claimed = 250, total = null, remaining = null)).claimedFraction)
+        assertNull(RewardCardState.of(reward(claimed = 0, total = 0, remaining = 0)).claimedFraction)
+    }
+
+    @Test
     fun unlimited_showsUnlimitedWithNoRatio_andNeverOutOfStock() {
         val state = RewardCardState.of(reward(claimed = 250, total = null, remaining = null))
         assertEquals("Unlimited", rewardClaimedText(context, state))
         assertTrue(state.unlimited)
         assertFalse(state.outOfStock)
+    }
+
+    // ---- v1.63: the cause behind a disabled card, and the track's zero-claim rule
+
+    @Test
+    fun theEventSwitchOff_isRewardsOff_whileTheRewardsOwnStatusIsDisabled() {
+        val live = reward(claimed = 3, total = 10, remaining = 7)
+
+        // The switch disables the whole event's redemption: the word names that, not the reward.
+        assertEquals(RewardBadge.REWARDS_OFF, rewardBadge(live, rewardsEnabled = false))
+        assertEquals("Rewards off", context.getString(rewardBadge(live, rewardsEnabled = false).labelRes))
+
+        // The reward's own server status is the other cause, and keeps the plain word.
+        val inactive = live.copy(status = RewardStatus.INACTIVE)
+        assertEquals(RewardBadge.DISABLED, rewardBadge(inactive, rewardsEnabled = true))
+        assertEquals("Disabled", context.getString(rewardBadge(inactive, rewardsEnabled = true).labelRes))
+
+        // Both are blocked; both are derived without an Activity.
+        assertTrue(RewardBadge.REWARDS_OFF.blocksRedemption)
+        assertTrue(RewardBadge.DISABLED.blocksRedemption)
+    }
+
+    @Test
+    fun availableAndOutOfStock_areUnaffectedByTheCauseSplit() {
+        val live = reward(claimed = 3, total = 10, remaining = 7)
+        assertEquals(RewardBadge.AVAILABLE, rewardBadge(live, rewardsEnabled = true))
+        assertEquals(context.getString(rewardBadge(live, true).labelRes), "Available")
+        assertFalse(RewardBadge.AVAILABLE.blocksRedemption)
+
+        val soldOut = reward(claimed = 10, total = 10, remaining = 0)
+        assertEquals(RewardBadge.OUT_OF_STOCK, rewardBadge(soldOut, rewardsEnabled = true))
+        assertEquals(context.getString(rewardBadge(soldOut, true).labelRes), context.getString(R.string.reward_details_out_of_stock))
+        assertFalse(RewardBadge.OUT_OF_STOCK.blocksRedemption)
+
+        // An inactive reward that is also sold out stays a status exception, not an inventory one.
+        assertEquals(RewardBadge.DISABLED, rewardBadge(soldOut.copy(status = RewardStatus.INACTIVE), rewardsEnabled = true))
+    }
+
+    @Test
+    fun claimsTrackFraction_isHiddenAtZeroClaims_andUnchangedOtherwise() {
+        // Partial and full paint exactly what claimedFraction paints.
+        assertEquals(0.5f, RewardCardState.of(reward(claimed = 5, total = 10, remaining = 5)).claimsTrackFraction)
+        assertEquals(1f, RewardCardState.of(reward(claimed = 10, total = 10, remaining = 0)).claimsTrackFraction)
+        assertEquals(1f, RewardCardState.of(reward(claimed = 14, total = 10, remaining = 0)).claimsTrackFraction)
+        // Zero claims: no sliver, so no track (an empty one reads as a divider).
+        assertNull(RewardCardState.of(reward(claimed = 0, total = 10, remaining = 10)).claimsTrackFraction)
+        // Unlimited, a zero total and no ratio at all stay hidden too.
+        assertNull(RewardCardState.of(reward(claimed = 250, total = null, remaining = null)).claimsTrackFraction)
+        assertNull(RewardCardState.of(reward(claimed = 0, total = 0, remaining = 0)).claimsTrackFraction)
     }
 
     @Test

@@ -49,7 +49,7 @@ open class RegisteredEventsActivity : AppCompatActivity(), RegisteredEventsContr
         setContentView(R.layout.activity_user_registered_events)
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
-        configureAttendeeBottomNav(null)
+        configureAttendeeBottomNav(boundAttendeeNavItem)
 
         PassHeadBinder.bindCompact(
             findViewById(R.id.passHead),
@@ -244,7 +244,15 @@ open class RegisteredEventsActivity : AppCompatActivity(), RegisteredEventsContr
         renderFilteredEvents()
     }
 
-    private companion object {
-        const val TAG = "RegisteredEvents"
+    internal companion object {
+        private const val TAG = "RegisteredEvents"
+
+        /**
+         * `My passes` is the attendee bar's third item (§5.7's five-item rule), so this screen is a
+         * tab: it binds the bar with its own item selected instead of leaving every tab unselected.
+         * The id maps straight back here, so the selected item is also the self-tap the binder
+         * ignores.
+         */
+        val boundAttendeeNavItem = AttendeeBottomNavItem.PASSES
     }
 }

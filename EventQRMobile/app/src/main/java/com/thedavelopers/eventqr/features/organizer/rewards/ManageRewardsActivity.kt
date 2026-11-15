@@ -8,6 +8,7 @@ import com.thedavelopers.eventqr.ui.theme.dimenPx
 import com.thedavelopers.eventqr.features.organizer.orgColors
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
@@ -18,12 +19,15 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.features.organizer.tintBlock
@@ -31,7 +35,6 @@ import com.thedavelopers.eventqr.features.organizer.tintBlockArgb
 import com.thedavelopers.eventqr.core.api.ApiConfig
 import com.thedavelopers.eventqr.core.api.dto.ApiResponse
 import com.thedavelopers.eventqr.core.api.sharedGson
-import com.thedavelopers.eventqr.core.api.dto.RewardStatus
 import com.thedavelopers.eventqr.features.events.model.dto.EventResponse
 import com.thedavelopers.eventqr.features.organizer.NAV_REWARDS
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpDataSource
@@ -59,13 +62,13 @@ import com.thedavelopers.eventqr.features.organizer.styledText
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResponse
 import com.thedavelopers.eventqr.ui.components.EventPickerField
 import com.thedavelopers.eventqr.ui.components.EventPickerOption
-import com.thedavelopers.eventqr.ui.components.ListRowBinder
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRequest
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 import retrofit2.Retrofit
@@ -312,42 +315,107 @@ open class ManageRewardsActivity : AppCompatActivity() {
         }
     }
 
-    private enum class RewardBadge { DISABLED, OUT_OF_STOCK, AVAILABLE }
-
-    /** One reward row from `item_manage_reward.xml`; the badge tone comes from the §5.4 mapping. */
-    private fun rewardCard(reward: RewardResponse, rewardsEnabled: Boolean): View {
+    /**
+     * One reward card from `item_manage_reward.xml`.
+     *
+     * The state mark is quiet while the reward can be redeemed and loud while it cannot (§5.4, v1.62):
+     * a 6dp success dot plus the word for AVAILABLE, a bordered strong pill for the two exceptions. A
+     * blocked body drops to secondary ink instead of a blanket alpha, which would push its own text
+     * under 4.5:1 (0.5 x ui_text_secondary over ui_surface is 2.21:1) and would dim the pill that has
+     * to stay the loudest thing on the card. The action pair quiets with it (v1.63): `Edit` loses its
+     * tonal fill and drops to ui_text_secondary ink, which is 6.62:1 on ui_surface - still AA, still a
+     * 48dp control, still the same sheet.
+     */
+    @VisibleForTesting
+    internal fun rewardCard(reward: RewardResponse, rewardsEnabled: Boolean): View {
         val stockState = RewardCardState.of(reward)
-        val active = rewardsEnabled && reward.status == RewardStatus.ACTIVE && !stockState.outOfStock
+        val mark = rewardBadge(reward, rewardsEnabled)
         val row = LayoutInflater.from(this).inflate(R.layout.item_manage_reward, rewardHost, false)
 
-        row.findViewById<TextView>(R.id.mrw_reward_name).text = reward.name
+        val name = row.findViewById<TextView>(R.id.mrw_reward_name)
+        name.text = reward.name
         row.findViewById<TextView>(R.id.mrw_reward_points).text =
             resources.getQuantityString(R.plurals.manage_rewards_cost_pts, reward.pointsRequired, formatCount(reward.pointsRequired))
         row.findViewById<TextView>(R.id.mrw_reward_stock).text = rewardClaimedText(this, stockState)
 
-        val badge = row.findViewById<TextView>(R.id.mrw_reward_badge)
-        when {
-            !rewardsEnabled || reward.status == RewardStatus.INACTIVE -> {
-                badge.setText(R.string.manage_rewards_badge_disabled)
-                ListRowBinder.applyBadgeTone(badge, R.style.Widget_EventQR_Ui_StatusBadge_Neutral)
-            }
-            stockState.outOfStock -> {
-                badge.setText(R.string.reward_details_out_of_stock)
-                ListRowBinder.applyBadgeTone(badge, R.style.Widget_EventQR_Ui_StatusBadge_Error)
-            }
-            else -> {
-                badge.setText(R.string.manage_rewards_badge_available)
-                ListRowBinder.applyBadgeTone(badge, R.style.Widget_EventQR_Ui_StatusBadge_Success)
-            }
-        }
+        bindStatusMark(row, mark)
+        bindClaimsTrack(row, stockState, mark)
+
+        // Dimmed by ink, never by alpha: the two role inks both clear AA on the card surface.
+        val dimmed = mark.blocksRedemption
+        name.setTextColor(color(if (dimmed) R.color.ui_text_secondary else R.color.ui_text_primary))
+        row.findViewById<ImageView>(R.id.imgRewardIcon).imageTintList =
+            ColorStateList.valueOf(color(if (dimmed) R.color.ui_text_secondary else R.color.ui_primary))
 
         row.findViewById<View>(R.id.mrw_reward_duplicate_note).visibility =
             if (reward.allowDuplicateClaims) View.VISIBLE else View.GONE
-        row.alpha = if (active) 1f else 0.6f
 
-        row.findViewById<View>(R.id.mrw_reward_edit).setOnClickListener { showRewardDialog(reward) }
-        row.findViewById<View>(R.id.mrw_reward_remove).setOnClickListener { confirmDeleteReward(reward) }
+        // Tapping the card edits the reward (no Edit button); TalkBack announces the action.
+        row.setOnClickListener { showRewardDialog(reward) }
+        ViewCompat.replaceAccessibilityAction(
+            row,
+            AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
+            getString(R.string.manage_rewards_edit),
+            null,
+        )
+
         return row
+    }
+
+    /** AVAILABLE wears the quiet mark; a state that blocks redemption wears a bordered strong pill. */
+    private fun bindStatusMark(row: View, mark: RewardBadge) {
+        val badge = row.findViewById<TextView>(R.id.mrw_reward_badge)
+        val dot = row.findViewById<View>(R.id.mrw_reward_status_dot)
+        // The word is the only node and the whole message ("Rewards off" names its cause), so the
+        // label text is the accessibility text - no content description repeating it.
+        badge.setText(mark.labelRes)
+        when (mark) {
+            // No fill, no pill: 6dp ui_success dot (the §5.4 tone for a live state) + the word in
+            // ui_text_secondary, 6.62:1 on ui_surface. The dot is decorative; the word is the label.
+            RewardBadge.AVAILABLE -> {
+                badge.background = null
+                badge.backgroundTintList = null
+                badge.setTextColor(color(R.color.ui_text_secondary))
+                badge.setPadding(0, 0, 0, 0)
+                dot.visibility = View.VISIBLE
+            }
+            RewardBadge.REWARDS_OFF, RewardBadge.DISABLED -> {
+                bindStrongPill(badge, R.drawable.bg_ui_badge_strong_neutral, R.color.ui_text_primary)
+                dot.visibility = View.GONE
+            }
+            RewardBadge.OUT_OF_STOCK -> {
+                bindStrongPill(badge, R.drawable.bg_ui_badge_strong_error, R.color.ui_on_error_container)
+                dot.visibility = View.GONE
+            }
+        }
+    }
+
+    /** Fill + 1dp boundary come from the drawable, so the style's background tint must be cleared. */
+    private fun bindStrongPill(badge: TextView, drawableRes: Int, inkRes: Int) {
+        badge.setBackgroundResource(drawableRes)
+        badge.backgroundTintList = null
+        badge.setTextColor(color(inkRes))
+        val padH = dimenPx(R.dimen.ui_badge_pad_h)
+        badge.setPadding(padH, 0, padH, 0)
+    }
+
+    /**
+     * The claims track. Decorative to TalkBack - the claimed line above it states the fact - and
+     * hidden while there is no total to draw (unlimited, or a zero supply), at zero claims (an empty
+     * track is just a tonal rule) and on a disabled reward. A full track is the out-of-stock fact, so
+     * that state keeps it.
+     */
+    private fun bindClaimsTrack(row: View, state: RewardCardState, mark: RewardBadge) {
+        val track = row.findViewById<ProgressBar>(R.id.mrw_reward_progress)
+        val fraction = state.claimsTrackFraction
+        val total = state.totalQuantity
+        if (fraction == null || total == null || mark.blocksRedemption) {
+            track.visibility = View.GONE
+            return
+        }
+        track.max = total
+        track.progress = (fraction * total).roundToInt()
+        track.visibility = View.VISIBLE
     }
     private fun buildActionButton(
         label: String,
@@ -445,6 +513,24 @@ open class ManageRewardsActivity : AppCompatActivity() {
         form.addView(descriptionInput)
         form.addView(fieldLabel(getString(R.string.manage_rewards_settings)))
         form.addView(duplicateSwitch)
+        val removeAction = if (reward != null) {
+            // Remove lives in the edit sheet (v1.64): quiet destructive text, then the usual confirm.
+            Button(this, null, 0, R.style.Widget_EventQR_Ui_Button_Destructive_Text_Inline).apply {
+                id = com.thedavelopers.eventqr.R.id.mrw_reward_remove
+                setText(R.string.manage_rewards_remove)
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, 0)
+                form.addView(
+                    this,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dimenPx(R.dimen.space_md) },
+                )
+            }
+        } else {
+            null
+        }
 
         // §5.12: one dialog base; the form slots between the title and the right-aligned text actions.
         val root = layoutInflater.inflate(R.layout.dialog_base, null, false) as LinearLayout
@@ -488,6 +574,11 @@ open class ManageRewardsActivity : AppCompatActivity() {
         root.findViewById<Button>(R.id.dialogNegative).apply {
             setText(R.string.request_event_cancel)
             setOnClickListener { dialog.dismiss() }
+        }
+
+        removeAction?.setOnClickListener {
+            dialog.dismiss()
+            confirmDeleteReward(reward!!)
         }
 
         dialog.show()
@@ -542,6 +633,7 @@ open class ManageRewardsActivity : AppCompatActivity() {
         dialog.setCancelable(!busy)
         dialog.findViewById<Button>(R.id.dialogPositive)?.isEnabled = !busy
         dialog.findViewById<Button>(R.id.dialogNegative)?.isEnabled = !busy
+        dialog.findViewById<Button>(R.id.mrw_reward_remove)?.isEnabled = !busy
     }
 
     override fun onDestroy() {

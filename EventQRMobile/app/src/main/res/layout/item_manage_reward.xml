@@ -1,19 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    REWARD ROW (§6.4 manage rewards, §5.3 card + §5.4 one badge).
+    REWARD ROW (6.4 manage rewards, 5.3 card + 5.4 status mark).
 
-        Hairline card: 44dp icon tile, name, cost in numeric_s, claimed line in micro,
-        ONE status badge on the right, then the edit (secondary) and remove (destructive-outline)
-        actions at 44dp. No gradient, no per-status drawable, no elevation.
+        Hairline card: 44dp icon tile, name, cost in numeric_s and the claimed line in micro in the text
+        column, the ONE status mark on the trailing edge of that header row (a quiet success dot + word
+        while the reward is available, a bordered strong pill for the two exceptions), then the claims
+        track across the FULL content width, then the action pair: edit (secondary tonal, wrap_content at
+        the start edge) and remove (quiet destructive text, wrap_content) at one 48dp inline geometry on
+        one baseline, with remove flush to the card's end edge.
 
-    Ids mrw_reward_name / _points / _stock / _edit / _remove are unchanged.
+        v1.63 right-edge rule: the track, the status mark and `Remove` all end on the card's content
+        edge - one inset, no per-element padding of their own - and `Edit` no longer stretches, so the
+        card has one right edge and two rows that start on its left one. A disabled card quiets Edit to
+        the ghost tone in code (fill removed, ink to ui_text_secondary), never by alpha.
+
+        The mark's tone, the dimmed body of a disabled reward and the progress value are bound in
+        ManageRewardsActivity; this layout only carries the AVAILABLE (quiet) idle state.
+        No gradient, no per-status drawable, no elevation, no fixed height.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:background="@drawable/bg_ui_card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="@dimen/space_8"
+    android:id="@+id/mrw_reward_edit"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
     android:orientation="vertical"
     android:padding="@dimen/ui_card_padding">
 
@@ -74,15 +89,65 @@
                 tools:text="3 of 10 claimed" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/mrw_reward_badge"
-            style="@style/Widget.EventQR.Ui.StatusBadge.Neutral"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minHeight="@dimen/ui_badge_height"
             android:layout_marginStart="@dimen/space_8"
-            tools:text="Available" />
+            android:gravity="end"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/mrw_reward_status_dot"
+                    android:layout_width="@dimen/ui_badge_dot"
+                    android:layout_height="@dimen/ui_badge_dot"
+                    android:layout_marginEnd="@dimen/ui_badge_dot_gap"
+                    android:background="@drawable/bg_ui_dot_solid"
+                    android:backgroundTint="@color/ui_success"
+                    android:importantForAccessibility="no" />
+
+                <TextView
+                    android:id="@+id/mrw_reward_badge"
+                    style="@style/Widget.EventQR.Ui.StatusBadge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="2"
+                    tools:text="Available" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Affordance: the whole card opens the edit sheet (Remove lives in that sheet). -->
+        <ImageView
+            android:id="@+id/mrw_reward_chevron"
+            android:layout_width="@dimen/icon_sm"
+            android:layout_height="@dimen/icon_sm"
+            android:layout_marginStart="@dimen/space_8"
+            android:contentDescription="@null"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_ui_chevron_right"
+            app:tint="@color/ui_text_secondary" />
     </LinearLayout>
+
+    <!-- Claims track: decorative (the claimed line carries the fact), full content width, flat,
+         full-radius ends. Hidden while unlimited, at zero claims and on a disabled reward; a full
+         track is the out-of-stock fact. -->
+    <ProgressBar
+        android:id="@+id/mrw_reward_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/ui_progress_height"
+        android:layout_marginTop="@dimen/space_xs"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:indeterminate="false"
+        android:max="100"
+        android:progress="0"
+        android:progressDrawable="@drawable/progress_claims" />
 
     <TextView
         android:id="@+id/mrw_reward_duplicate_note"
@@ -93,30 +158,4 @@
         android:textAppearance="@style/TextAppearance.EventQR.Type.Micro"
         android:textColor="@color/ui_text_secondary"
         android:visibility="gone" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/space_12"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/mrw_reward_edit"
-            style="@style/Widget.EventQR.Ui.Button.Secondary.Inline"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/ui_button_height_inline"
-            android:layout_weight="1"
-            android:text="@string/manage_rewards_edit" />
-
-        <Button
-            android:id="@+id/mrw_reward_remove"
-            style="@style/Widget.EventQR.Ui.Button.Destructive.Inline"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/ui_button_height_inline"
-            android:layout_marginStart="@dimen/space_8"
-            android:layout_weight="1"
-            android:text="@string/manage_rewards_remove" />
-    </LinearLayout>
 </LinearLayout>

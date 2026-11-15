@@ -189,10 +189,10 @@ class DashboardStatesTest {
     }
 
     /**
-     * The three quick-action chips are Home's own block, and the attendee Profile reaches the same
-     * destinations through its `My passes` ACTIVITY row. Both resolve the mapping in
-     * `features/attendee/AttendeeQuickActions.kt`, so "same navigation" is checked against the
-     * shared map on both screens rather than assumed.
+     * The three quick-action chips are Home's own block (§6.2): Home is their only host, since
+     * `My passes` is the attendee bar's centre item (§5.7) and the Profile no longer carries a row
+     * for it. Both the chip and the bar resolve pure id -> screen maps, so this checks the map the
+     * chips use rather than assuming the navigation.
      */
     @Test
     fun quickActionChips_openTheAttendeeDestinations() {

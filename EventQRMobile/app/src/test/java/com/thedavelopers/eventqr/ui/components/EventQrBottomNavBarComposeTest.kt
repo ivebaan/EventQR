@@ -23,6 +23,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.EventQrTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -48,12 +49,17 @@ class EventQrBottomNavBarComposeTest {
     @Test
     fun attendeeNavItems_exposeExpectedIdsAndLabels() {
         assertEquals(
-            listOf("home", "events", "rewards", "profile"),
+            listOf("home", "events", "passes", "rewards", "profile"),
             AttendeeNavItems.map { it.id },
         )
         assertEquals(
-            listOf("Home", "Events", "Rewards", "Profile"),
+            listOf("Home", "Events", "My passes", "Rewards", "Profile"),
             AttendeeNavItems.map { it.label },
+        )
+        assertEquals(
+            "My passes is the centre of the five-item bar",
+            AppIcons.Pass,
+            AttendeeNavItems[2].icon,
         )
     }
 
@@ -73,7 +79,7 @@ class EventQrBottomNavBarComposeTest {
     fun attendeeNavBar_rendersEveryItemLabel() {
         setNavBar(items = AttendeeNavItems, selectedId = "home")
 
-        listOf("Home", "Events", "Rewards", "Profile").forEach { label ->
+        listOf("Home", "Events", "My passes", "Rewards", "Profile").forEach { label ->
             composeTestRule.onNodeWithText(label).assertIsDisplayed()
         }
     }
@@ -142,7 +148,7 @@ class EventQrBottomNavBarComposeTest {
     fun everyItem_exposesTabRole() {
         setNavBar(items = AttendeeNavItems, selectedId = "home")
 
-        listOf("Home", "Events", "Rewards", "Profile").forEach { label ->
+        listOf("Home", "Events", "My passes", "Rewards", "Profile").forEach { label ->
             assertEquals(Role.Tab, roleOf(label))
         }
     }
@@ -154,6 +160,29 @@ class EventQrBottomNavBarComposeTest {
         composeTestRule.onNode(hasText("Events")).assertIsSelected()
         composeTestRule.onNode(hasText("Home")).assertIsNotSelected()
         composeTestRule.onNode(hasText("Rewards")).assertIsNotSelected()
+        composeTestRule.onNode(hasText("My passes")).assertIsNotSelected()
+    }
+
+    /** RegisteredEventsActivity binds the bar with `passes` selected: the bar never goes blank. */
+    @Test
+    fun myPassesSelected_marksTheCentreItemOnly() {
+        setNavBar(items = AttendeeNavItems, selectedId = "passes")
+
+        composeTestRule.onNode(hasText("My passes")).assertIsSelected()
+        listOf("Home", "Events", "Rewards", "Profile").forEach { label ->
+            composeTestRule.onNode(hasText(label)).assertIsNotSelected()
+        }
+    }
+
+    @Test
+    fun clickingMyPasses_firesThePassesId() {
+        var selected: String? = null
+        setNavBar(items = AttendeeNavItems, selectedId = "home", onItemSelected = { selected = it })
+
+        composeTestRule.onNodeWithText("My passes").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals("passes", selected)
     }
 
     @Test
@@ -203,7 +232,7 @@ class EventQrBottomNavBarComposeTest {
     fun everyItem_meetsMinimumTouchHeight() {
         setNavBar(items = AttendeeNavItems, selectedId = "home")
 
-        listOf("Home", "Events", "Rewards", "Profile").forEach { label ->
+        listOf("Home", "Events", "My passes", "Rewards", "Profile").forEach { label ->
             composeTestRule.onNode(hasText(label)).assertHeightIsAtLeast(48.dp)
         }
     }
@@ -212,7 +241,7 @@ class EventQrBottomNavBarComposeTest {
     fun unknownSelectedId_leavesEveryItemUnselected() {
         setNavBar(items = AttendeeNavItems, selectedId = "does-not-exist")
 
-        listOf("Home", "Events", "Rewards", "Profile").forEach { label ->
+        listOf("Home", "Events", "My passes", "Rewards", "Profile").forEach { label ->
             composeTestRule.onNode(hasText(label)).assertIsNotSelected()
         }
     }
@@ -224,6 +253,35 @@ class EventQrBottomNavBarComposeTest {
         OrganizerNavItems.forEach { item ->
             composeTestRule.onNodeWithText(item.label).assertIsDisplayed()
         }
+    }
+
+    /**
+     * §5.7's five-item rule now covers the attendee bar too. At 360dp each slot is 72dp and the
+     * label budget is 64dp; the widest attendee label still fits at the default scale, so `My passes`
+     * renders like its siblings instead of collapsing the bar to icons.
+     */
+    @Test
+    fun attendeeBar_fiveItems_keepsLabelsAt360dp() {
+        setNavBar(items = AttendeeNavItems, selectedId = "passes", fontScale = 1f)
+
+        AttendeeNavItems.forEach { item ->
+            composeTestRule.onNodeWithText(item.label).assertIsDisplayed()
+        }
+    }
+
+    /** Five items at 360dp drop labels above the measured threshold, the same fallback as four. */
+    @Test
+    fun attendeeBar_fiveItems_dropsLabelsAtFontScaleOnePointThree() {
+        setNavBar(items = AttendeeNavItems, selectedId = "passes", fontScale = 1.3f)
+
+        composeTestRule.onAllNodesWithText("My passes").assertCountEquals(0)
+        AttendeeNavItems.forEach { item ->
+            val node = composeTestRule.onNodeWithContentDescription(item.label)
+            node.assertIsDisplayed()
+            assertEquals(Role.Tab, node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.Role))
+            node.assertHeightIsAtLeast(48.dp)
+        }
+        composeTestRule.onNodeWithContentDescription("My passes").assertIsSelected()
     }
 
     @Test

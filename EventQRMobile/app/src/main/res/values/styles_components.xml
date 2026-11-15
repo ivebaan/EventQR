@@ -354,6 +354,12 @@
         <item name="android:textAllCaps">false</item>
         <!-- TextView carries TOP|START by default; a <Button> does not need this, a styled TextView does. -->
         <item name="android:gravity">center</item>
+        <!-- Labels are centred by their glyphs, not by a line box that carries font padding (which is
+             heavier above the ascent): with the default, a 48dp button with no vertical padding paints
+             its ink ~1.75dp below the box centre (measured at 4x: ink rows 80..118 in a 192px box,
+             77..115 with the attribute off). textAppearance cannot carry this attribute, so the
+             button family sets it here. -->
+        <item name="android:includeFontPadding">false</item>
         <item name="android:minHeight">@dimen/ui_button_height</item>
         <item name="android:minWidth">@dimen/ui_touch_min</item>
         <item name="android:paddingHorizontal">@dimen/space_xl</item>
@@ -369,6 +375,7 @@
         <item name="android:textColor">@color/ui_primary</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:gravity">center</item>
+        <item name="android:includeFontPadding">false</item>
         <item name="android:minHeight">@dimen/ui_button_height_inline</item>
         <item name="android:paddingHorizontal">@dimen/space_lg</item>
     </style>

@@ -32,10 +32,10 @@ import kotlinx.coroutines.launch
  * status-bar inset, the same wiring as the attendee Rewards screen and the admin Accounts /
  * Requests screens. Everything below the tear scrolls, identity block included. The identity is
  * one TalkBack node (its name is the heading) and the two sections are `list_row_icon` rows bound
- * through [ListRowBinder]: ACCOUNT first with Edit profile alone, then ACTIVITY (My passes,
- * Transaction history, Claimed rewards, My event requests) and the Sign out block. My passes opens
- * the registered-events screen through [attendeeQuickActionDestination], the mapping the dashboard's
- * own chip uses - the page carries no quick-action strip of its own. There is no version footer
+ * through [ListRowBinder]: ACCOUNT first with Edit profile alone, then ACTIVITY (Transaction
+ * history, Claimed rewards, My event requests) and the Sign out block. My passes is not a row here:
+ * it is the attendee bar's third item (§5.7's five-item rule), so the page carries no second entry
+ * point to a tab that is already on screen. There is no quick-action strip and no version footer
  * (v1.52). Every role reaches this screen, so it holds no portal switch - the dashboard role tabs do
  * that.
  *
@@ -123,21 +123,6 @@ class AttendeeProfileActivity : AppCompatActivity() {
     }
 
     private fun bindActivityRows() {
-        // My passes leads: it is the top-of-mind action and the dashboard's first chip. The
-        // destination is the dashboard chip's own mapping entry, so the row and the chip cannot
-        // drift apart.
-        bindRow(
-            R.id.rowMyPasses,
-            title = getString(R.string.ui_attendee_my_passes),
-            meta = getString(R.string.ui_attendee_profile_meta_passes),
-            icon = AppIcons.Pass,
-        ) {
-            val destination = requireNotNull(attendeeQuickActionDestination(R.id.btnMyPasses)) {
-                "My passes has no destination"
-            }
-            startActivity(Intent(this, destination))
-        }
-
         bindRow(
             R.id.rowTransactionHistory,
             title = getString(R.string.ui_attendee_transaction_history),

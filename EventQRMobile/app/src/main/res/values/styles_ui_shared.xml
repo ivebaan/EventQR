@@ -41,7 +41,10 @@
         <item name="android:textColor">@color/ui_primary</item>
     </style>
 
-    <!-- 48dp Secondary, inline (sheet action stack, empty-state secondary action). -->
+    <!-- 48dp Secondary, inline (sheet action stack, empty-state secondary action, a reward row's
+         Edit action). The style owns the height (§9.3: the call site stays wrap_content and adds no
+         second minHeight), so it is the one geometry the Destructive.Inline twin shares - the two
+         tones differ by fill and ink only. -->
     <style name="Widget.EventQR.Ui.Button.Secondary.Inline">
         <item name="android:minHeight">@dimen/ui_button_height_inline</item>
         <item name="android:textAppearance">@style/TextAppearance.EventQR.Type.ButtonLabelInline</item>
@@ -53,9 +56,29 @@
         <item name="android:textColor">@color/ui_button_destructive_text</item>
     </style>
 
-    <!-- 48dp Destructive, inline (a single destructive row action). -->
+    <!-- 48dp Destructive, inline (a single destructive row action). The outlined trigger is the
+         quietest destructive control 5.1 sanctioned before v1.62; the reward row's `Remove` now wears
+         Destructive.Text.Inline instead (next style). Same geometry as Secondary.Inline by rule, so a
+         pair never reads as two heights. -->
     <style name="Widget.EventQR.Ui.Button.Destructive.Inline">
         <item name="android:minHeight">@dimen/ui_button_height_inline</item>
+        <item name="android:textAppearance">@style/TextAppearance.EventQR.Type.ButtonLabelInline</item>
+    </style>
+
+    <!-- 48dp Destructive TEXT, inline (5.1, v1.62). No fill, no boundary, no glyph: a bare ui_error
+         label that shares the Secondary.Inline geometry - same 48dp floor from the style, same
+         ButtonLabelInline type, includeFontPadding false and no vertical padding - so it lands on its
+         sibling's baseline. USAGE RULE: only a rare destructive row action that opens a confirm, at the
+         END of the action row, wrap_content wide, with the sibling taking the remaining width. Any other
+         destructive control is the outlined trigger (Destructive.Inline) or, inside the confirm, the
+         filled DestructiveCommit. Press = ui_error_container wash, focus = 2dp ui_error ring.
+         ui_error is 6.59:1 on ui_surface, so the label needs no fill to reach AA. -->
+    <style name="Widget.EventQR.Ui.Button.Destructive.Text.Inline" parent="@style/Widget.EventQR.Ui.Button.Destructive">
+        <item name="android:background">@drawable/bg_ui_button_destructive_text</item>
+        <item name="android:textColor">@color/ui_error</item>
+        <item name="android:minHeight">@dimen/ui_button_height_inline</item>
+        <item name="android:minWidth">@dimen/ui_touch_min</item>
+        <item name="android:paddingHorizontal">@dimen/space_md</item>
         <item name="android:textAppearance">@style/TextAppearance.EventQR.Type.ButtonLabelInline</item>
     </style>
 

@@ -115,6 +115,10 @@
 
     <!-- ═════════ Skeleton (§5.11) ═════════ -->
     <dimen name="ui_progress_inline">20dp</dimen>  <!-- in-button indeterminate spinner -->
+    <!-- Determinate claims track (6.4 manage rewards): a thin flat bar, full-radius ends from
+         ui_radius_badge, ui_primary fill over a ui_surface_sunken track. Not a chart span, so it does
+         not borrow ui_chart_bar_height; a fixed height is correct here because the bar carries no text. -->
+    <dimen name="ui_progress_height">4dp</dimen>
     <dimen name="ui_skeleton_bar_height">12dp</dimen>
     <dimen name="ui_skeleton_title_width">160dp</dimen>
     <dimen name="ui_skeleton_label_width">80dp</dimen>

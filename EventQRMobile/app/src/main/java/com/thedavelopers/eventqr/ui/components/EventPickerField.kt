@@ -57,7 +57,9 @@ internal fun filterEventOptions(options: List<EventPickerOption>, query: String)
  * (plan 5.2 "Event picker"). One focusable node - the text input - carries the query and the
  * accessibility contract; any tap or focus gain clears the query, raises the keyboard and drops
  * the full list under it, typing filters, and the hint keeps naming the chosen event. The chosen
- * title only returns to the text when the user leaves without choosing (v1.58).
+ * title only returns to the text when the user leaves without choosing (v1.58), and every exit
+ * that leaves the title in the field with no keyboard - a choice, Back, a focus loss, an outside
+ * dismissal - puts the field back at rest: no caret, no ring, the meta line shown (v1.59).
  */
 class EventPickerField @JvmOverloads constructor(
     context: Context,
@@ -68,6 +70,13 @@ class EventPickerField @JvmOverloads constructor(
     private val input: EventPickerInput
     private val meta: TextView
     private val trailing: ImageView
+    /**
+     * The field's resting focus holder (v1.59): a finished search hands its focus here instead of
+     * leaving it in the text, so no caret, no IME target and no selection stay behind. One dp - the
+     * narrowest token on the scale, because a zero-sized view cannot take focus on API 28+ - with no
+     * background, no place in focus traversal and nothing for accessibility to read.
+     */
+    private val focusSink: View
     private val adapter = EventPickerAdapter(context)
 
     private var options: List<EventPickerOption> = emptyList()
@@ -87,6 +96,14 @@ class EventPickerField @JvmOverloads constructor(
     private var announceRunnable: Runnable? = null
     private var appliedDropDownHeight = -1
     private val dismissExitCheck = Runnable { onPopupDismissedForGood() }
+    /**
+     * True while the field stands at rest on the chosen title (v1.59). Focus may sit on
+     * [focusSink] - or be handed back to the input by the window - and this is what keeps either
+     * from painting the ring: the ring belongs to a search in progress, not to a settled selection.
+     */
+    private var atRest = true
+    /** Set while the field hands its focus to its own focus holder, so the loss is not read as leaving. */
+    private var handingOverFocus = false
 
     init {
         orientation = HORIZONTAL
@@ -103,6 +120,13 @@ class EventPickerField @JvmOverloads constructor(
         input = findViewById(R.id.eventPickerInput)
         meta = findViewById(R.id.eventPickerMeta)
         trailing = findViewById(R.id.eventPickerTrailing)
+        focusSink = View(context).apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val sinkSize = dimenPx(R.dimen.stroke_hairline)
+        addView(focusSink, LayoutParams(sinkSize, sinkSize))
 
         input.showSoftInputOnFocus = true
         input.setRawInputType(InputType.TYPE_CLASS_TEXT)
@@ -155,7 +179,15 @@ class EventPickerField @JvmOverloads constructor(
                 }
             } else {
                 dismissList()
-                revertText()
+                if (handingOverFocus) {
+                    // The field took its own focus away: the title and the hint stay, only the
+                    // furniture an at-rest field shows comes back (v1.59).
+                    awaitingUserGesture = true
+                    restoreMetaLine()
+                } else {
+                    revertText()
+                    settleAtRest()
+                }
             }
         }
 
@@ -175,6 +207,7 @@ class EventPickerField @JvmOverloads constructor(
                 revertText()
                 dismissList()
                 hideKeyboard()
+                settleAtRest()
                 true
             }
         }
@@ -221,7 +254,7 @@ class EventPickerField @JvmOverloads constructor(
 
             override fun performAccessibilityAction(host: View, action: Int, args: Bundle?): Boolean = when (action) {
                 AccessibilityActionCompat.ACTION_EXPAND.id -> {
-                    openList()
+                    openForSearch()
                     true
                 }
                 AccessibilityActionCompat.ACTION_COLLAPSE.id -> {
@@ -339,6 +372,9 @@ class EventPickerField @JvmOverloads constructor(
      */
     private fun openForSearch() {
         if (!isEnabled || loading) return
+        atRest = false
+        input.isCursorVisible = true
+        refreshDrawableState()
         clearQuery()
         if (!input.hasFocus()) input.requestFocus()
         showKeyboard()
@@ -395,15 +431,15 @@ class EventPickerField @JvmOverloads constructor(
         programmatic = false
         applyHint()
         meta.text = option.meta.orEmpty()
-        meta.visibility = View.GONE
         ViewCompat.setStateDescription(input, option.title)
         renderTrailing()
         hideKeyboard()
         dismissList()
+        // A choice ends the search, so the field goes back to looking at rest on the new title -
+        // no caret, no ring, the meta line back (v1.59). The handover runs while `selecting` is on,
+        // so the focus loss it causes can never be read as the user leaving and revert.
+        settleAtRest()
         selecting = false
-        // Focus stays on the input on purpose: clearFocus() hands it straight back to the only
-        // focusable view on a short screen, and that gain would open a search over the new
-        // selection. The next tap clears through the click path anyway (v1.58).
         // The host may rebuild its whole tree: run after the popup has gone.
         post { onSelected?.invoke(option.id) }
     }
@@ -418,6 +454,7 @@ class EventPickerField @JvmOverloads constructor(
         if (input.isPopupShowing || !input.hasFocus() || !hasQuery()) return
         hideKeyboard()
         revertText()
+        settleAtRest()
     }
 
     /** Reverts an unsubmitted query to the selected event's name; never auto-selects. */
@@ -430,8 +467,46 @@ class EventPickerField @JvmOverloads constructor(
         programmatic = false
         applyHint()
         meta.text = options.firstOrNull { it.id == selectedId }?.meta.orEmpty()
-        meta.visibility = if (meta.text.isNullOrBlank() || input.hasFocus()) View.GONE else View.VISIBLE
+        restoreMetaLine()
         renderTrailing()
+    }
+
+    /**
+     * The field at rest on the chosen title (v1.59): no caret, no selection handles, no ring, the
+     * meta line back. The input's focus goes to [focusSink], which [atRest] keeps flat, so the
+     * window has nowhere to hand the focus back to and the text is left looking untouched.
+     */
+    private fun settleAtRest() {
+        atRest = true
+        input.isCursorVisible = false
+        if (input.hasFocus()) {
+            handingOverFocus = true
+            focusSink.requestFocus()
+            handingOverFocus = false
+        }
+        refreshDrawableState()
+        restoreMetaLine()
+    }
+
+    /** The meta line is at-rest furniture: it shows whenever the field holds no live search. */
+    private fun restoreMetaLine() {
+        meta.visibility = if (meta.text.isNullOrBlank()) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * At rest the host must look flat even when focus sits inside it (v1.59): the sink it hands the
+     * focus to, or a focus the window handed back to the input. Stripping the state from the array
+     * `super` built keeps its length and its trailing zeros, so a parent that merges this group's
+     * states (or has `addStatesFromChildren`) still reads a valid array.
+     */
+    override fun onCreateDrawableState(extraSpace: Int): IntArray {
+        val states = super.onCreateDrawableState(extraSpace)
+        if (atRest) {
+            for (index in states.indices) {
+                if (states[index] == android.R.attr.state_focused) states[index] = 0
+            }
+        }
+        return states
     }
 
     /** The hint always names the chosen event, so a cleared search field still says what is selected. */

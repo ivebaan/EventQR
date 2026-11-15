@@ -420,6 +420,7 @@
     <string name="manage_rewards_event_rewards_desc">Enable or disable reward redemption for this event.</string>
     <string name="manage_rewards_add_reward">Add reward</string>
     <string name="manage_rewards_badge_disabled">Disabled</string>
+    <string name="manage_rewards_badge_rewards_off">Rewards off</string>
     <string name="manage_rewards_badge_available">Available</string>
     <string name="manage_rewards_duplicate_claims_note">Attendees may claim this reward more than once</string>
     <string name="manage_rewards_edit">Edit</string>

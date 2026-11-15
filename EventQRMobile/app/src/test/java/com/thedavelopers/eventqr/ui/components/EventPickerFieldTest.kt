@@ -524,4 +524,118 @@ class EventPickerFieldTest {
 
         assertFalse(input.isPopupShowing)
     }
+
+    /**
+     * The ring is `state_focused` on the host (`bg_ui_field`): the host merges its children's states,
+     * so the input's focus paints it. Robolectric does not merge a child's state into its parent, so
+     * the assertions below read the focus that drives the ring, and [theRestingFieldNeverPaintsTheRing]
+     * checks the ring itself by putting focus on the host.
+     */
+    private fun ringShown(): Boolean = picker.drawableState.contains(android.R.attr.state_focused)
+
+    private fun metaLine(): TextView = picker.findViewById(R.id.eventPickerMeta)
+
+    /** The field's own focus holder: the one plain focusable child next to the input, meta and chevron. */
+    private fun focusSink(): View = (0 until picker.childCount)
+        .map { picker.getChildAt(it) }
+        .first { it.isFocusable && it !is TextView && it !is ImageView }
+
+    @Test
+    fun choosingARow_leavesTheFieldAtRest() {
+        val picks = mutableListOf<String>()
+        picker.setOnEventSelectedListener { picks += it }
+        open()
+
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("a choice is reported once and once only", listOf("2"), picks)
+        assertEquals("Day Fair", input.text.toString())
+        assertFalse("a chosen row must not leave a caret in the field", input.isCursorVisible)
+        assertFalse("nothing in the field may still hold input focus", input.hasFocus())
+        assertTrue("the field must keep the focus the input gave up", focusSink().isFocused())
+        assertEquals("the meta line comes back at rest", "13 Nov 2026", metaLine().text.toString())
+        assertEquals(View.VISIBLE, metaLine().visibility)
+    }
+
+    @Test
+    fun theRestingFieldNeverPaintsTheRing() {
+        open()
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // A window can hand the focus back to the host; at rest that focus must not light the ring.
+        picker.isFocusable = true
+        picker.requestFocus()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue("the host must really hold focus for this check to mean anything", picker.isFocused())
+        assertFalse("a resting field must not paint the focus ring", ringShown())
+    }
+
+    @Test
+    fun reopeningAfterASelection_restoresTheCaretTheRing_andFilters() {
+        open()
+        input.onItemClickListener.onItemClick(null, null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse("the field must sit at rest before the reopen", input.isCursorVisible)
+
+        input.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue("reopening must show the caret again", input.isCursorVisible)
+        assertTrue("the input must hold focus again, which is what paints the ring", input.hasFocus())
+        assertFalse("the field must hand the resting focus back", focusSink().isFocused())
+        assertEquals("", input.text.toString())
+
+        input.setText("night")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("typing after a reopen still filters", 1, adapter().count)
+    }
+
+    @Test
+    fun focusLossRevert_leavesTheFieldAtRest() {
+        open()
+        input.setText("ate")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        focusElsewhere()
+
+        assertEquals("Night Market", input.text.toString())
+        assertFalse("a revert must not leave a caret in the field", input.isCursorVisible)
+        assertEquals("the meta line comes back at rest", "12 Nov 2026", metaLine().text.toString())
+    }
+
+    @Test
+    fun backRevert_leavesTheFieldAtRest() {
+        open()
+        input.setText("zzz")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val back = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
+        assertTrue(input.onKeyPreIme(KeyEvent.KEYCODE_BACK, back))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("Night Market", input.text.toString())
+        assertFalse("a Back revert must not leave a caret in the field", input.isCursorVisible)
+        assertFalse("a Back revert must take the focus out of the input", input.hasFocus())
+        assertTrue("the field must keep the focus", focusSink().isFocused())
+        assertEquals("the meta line comes back at rest", "12 Nov 2026", metaLine().text.toString())
+    }
+
+    @Test
+    fun outsideTapRevert_leavesTheFieldAtRest() {
+        open()
+        input.setText("zzz")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        popupField.dismiss()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("Night Market", input.text.toString())
+        assertFalse("an outside-tap revert must not leave a caret", input.isCursorVisible)
+        assertFalse("an outside-tap revert must take the focus out of the input", input.hasFocus())
+        assertTrue("the field must keep the focus", focusSink().isFocused())
+    }
 }

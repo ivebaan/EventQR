@@ -815,8 +815,10 @@ class ComponentInflationTest {
 
     /**
      * Quick actions (§6.2): three hug-width chips in a wrapping Flow, 8dp apart, starting on the
-     * gutter. `My passes` is the only entry point to the retired Registered tab; `Discover` stays
-     * the Events destination in the always-visible bottom nav. No chip may run past the gutter.
+     * gutter. `My passes` is Home's own top-of-mind action - the same destination is also the
+     * attendee bar's centre item since v1.60, and the chip stays because Home is the landing screen;
+     * `Discover` stays the Events destination in the always-visible bottom nav. No chip may run past
+     * the gutter.
      */
     @Test
     fun dashboardQuickActions_areHugWidthChipsInsideTheGutter() {
@@ -1858,8 +1860,8 @@ class ComponentInflationTest {
         val activityRows = root.findViewById<ViewGroup>(R.id.cardActivityMenu).getChildAt(0) as ViewGroup
         val accountRows = root.findViewById<ViewGroup>(R.id.cardAccountMenu).getChildAt(0) as ViewGroup
         assertEquals(
-            "ACTIVITY is one card of four rows, My passes first",
-            listOf(R.id.rowMyPasses, R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
+            "ACTIVITY is one card of three rows (My passes is a bar item, not a row)",
+            listOf(R.id.rowTransactionHistory, R.id.rowClaimedRewards, R.id.rowMyEventRequests),
             (0 until activityRows.childCount).map { activityRows.getChildAt(it).id },
         )
         assertEquals(

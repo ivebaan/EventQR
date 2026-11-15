@@ -11,14 +11,16 @@ import com.thedavelopers.eventqr.ui.components.AttendeeNavItems
 enum class AttendeeBottomNavItem {
     DASHBOARD,
     EVENTS,
+    PASSES,
     REWARDS,
     PROFILE,
 }
 
-private val AttendeeBottomNavItem.navId: String
+internal val AttendeeBottomNavItem.navId: String
     get() = when (this) {
         AttendeeBottomNavItem.DASHBOARD -> "home"
         AttendeeBottomNavItem.EVENTS -> "events"
+        AttendeeBottomNavItem.PASSES -> "passes"
         AttendeeBottomNavItem.REWARDS -> "rewards"
         AttendeeBottomNavItem.PROFILE -> "profile"
     }
@@ -27,6 +29,7 @@ private val AttendeeBottomNavItem.navId: String
 internal fun attendeeNavDestination(id: String): Class<out AppCompatActivity>? = when (id) {
     "home" -> DashboardActivity::class.java
     "events" -> AttendeeEventsActivity::class.java
+    "passes" -> RegisteredEventsActivity::class.java
     "rewards" -> AttendeeRewardsActivity::class.java
     "profile" -> AttendeeProfileActivity::class.java
     else -> null
@@ -36,7 +39,9 @@ internal fun attendeeNavDestination(id: String): Class<out AppCompatActivity>? =
  * Only the Home tab is a root: returning to it clears the tab history above it. Every other
  * destination is reordered to the front when it is already on the stack - pushing it again would
  * leave duplicate instances behind, so Back would need one press per visit - and pushed when it is
- * not, so Back still walks the tabs and exits from Home.
+ * not, so Back still walks the tabs and exits from Home. `passes` takes the non-home branch, so
+ * Home -> My passes -> Home -> My passes reuses the one RegisteredEventsActivity instead of
+ * stacking a second copy.
  */
 internal fun attendeeTabFlags(destination: Class<out AppCompatActivity>): Int =
     if (destination == DashboardActivity::class.java) {
@@ -51,7 +56,8 @@ internal fun AppCompatActivity.openAttendeeDestination(destination: Class<out Ap
 
 /**
  * Binds the shared Compose bottom navbar into the screen's [R.id.composeBottomNav] host.
- * Item set and destinations mirror the legacy XML nav: Home, Events, Rewards, Profile.
+ * Item set and destinations mirror the legacy XML nav, five items since §5.7's five-item rule:
+ * Home, Events, My passes, Rewards, Profile.
  * A null [selectedItem] binds the bar with no tab highlighted (screens reached outside the tabs).
  */
 fun AppCompatActivity.configureAttendeeBottomNav(selectedItem: AttendeeBottomNavItem?) {

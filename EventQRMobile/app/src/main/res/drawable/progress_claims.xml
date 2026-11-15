@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Claims track (6.4 manage rewards): a flat progress drawable for the horizontal ProgressBar.
+
+     background = ui_surface_sunken (the tonal track, 1.22:1 against the card surface - it is a track,
+     not a control boundary); progress = ui_primary (12.11:1 on ui_surface). Both shapes take the full
+     radius token, which GradientDrawable clamps to half the bar height, so the ends stay round at any
+     ui_progress_height. No gradient, no shadow.
+
+     The bar is decorative: the claimed line above it carries the fact for TalkBack. Hidden at zero
+     claims too - an empty sunken track is a 1.22:1 rule that reads as a divider (plan v1.63). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ui_surface_sunken" />
+            <corners android:radius="@dimen/ui_radius_badge" />
+        </shape>
+    </item>
+
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <solid android:color="@color/ui_primary" />
+                <corners android:radius="@dimen/ui_radius_badge" />
+            </shape>
+        </clip>
+    </item>
+
+</layer-list>

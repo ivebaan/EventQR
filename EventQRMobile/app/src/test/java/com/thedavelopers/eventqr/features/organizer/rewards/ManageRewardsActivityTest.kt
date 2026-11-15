@@ -20,6 +20,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -161,9 +163,10 @@ class ManageRewardsActivityTest {
         var createCalls = 0
         var rewards: List<RewardResponse> = emptyList()
         var rewardsSucceed = true
+        var rewardsSettings = true
         override suspend fun getRewards(eventId: String): ApiResponse<List<RewardResponse>> =
             ApiResponse(success = rewardsSucceed, message = if (rewardsSucceed) null else "Rewards unavailable", data = rewards)
-        override suspend fun getRewardSettings(eventId: String) = ApiResponse(success = true, data = true)
+        override suspend fun getRewardSettings(eventId: String) = ApiResponse(success = true, data = rewardsSettings)
         override suspend fun updateRewardSettings(eventId: String, request: RewardSettingsRequest) =
             ApiResponse<EventResponse>(success = false)
         override suspend fun createReward(eventId: String, request: RewardRequest): ApiResponse<RewardResponse> {
@@ -380,5 +383,174 @@ class ManageRewardsActivityTest {
 
         assertEquals(View.GONE, activity.findViewById<View>(R.id.mrw_add_reward).visibility)
         assertTrue(activity.window.decorView.allTexts().contains("Rewards unavailable"))
+    }
+
+    // ---- §5.1 inline pair on the reward row: one geometry, two tones, both still wired
+
+    @Test
+    fun rewardRowEditAction_stillOpensTheEditSheet() {
+        val activity = loadedScreen(FakeRewardsService().apply { rewards = listOf(activeReward()) })
+
+        activity.findViewById<View>(R.id.mrw_reward_edit).performClick()
+
+        assertEquals(
+            activity.getString(R.string.manage_rewards_edit_reward),
+            (ShadowAlertDialog.getLatestAlertDialog() as AlertDialog).titleText(),
+        )
+    }
+
+    @Test
+    fun rewardRowRemoveAction_stillRaisesTheConfirm() {
+        val activity = loadedScreen(FakeRewardsService().apply { rewards = listOf(activeReward()) })
+
+        activity.findViewById<View>(R.id.mrw_reward_edit).performClick()
+        ShadowAlertDialog.getLatestAlertDialog().findViewById<View>(R.id.mrw_reward_remove).performClick()
+
+        assertEquals(
+            activity.getString(R.string.manage_rewards_remove_reward),
+            (ShadowAlertDialog.getLatestAlertDialog() as AlertDialog).titleText(),
+        )
+    }
+
+    // ---- §5.4 v1.62: one quiet mark, two loud exceptions, one claims track per state
+
+    private fun reward(
+        name: String,
+        status: RewardStatus = RewardStatus.ACTIVE,
+        claimed: Long = 0L,
+        total: Int? = null,
+    ) = RewardResponse(
+        rewardId = UUID.randomUUID(),
+        eventId = UUID.randomUUID(),
+        name = name,
+        pointsRequired = 50,
+        status = status,
+        claimedCount = claimed,
+        totalQuantity = total,
+    )
+
+    /** Names sort A-Z, so the rows line up with this list. */
+    private fun threeStates(): ManageRewardsActivity {
+        val activity = build()
+        activity.rewardsServiceOverride = FakeRewardsService().apply {
+            rewards = listOf(
+                reward("Available item", claimed = 3, total = 10),
+                reward("Disabled item", status = RewardStatus.INACTIVE, claimed = 3, total = 10),
+                reward("Sold out item", claimed = 10, total = 10),
+            )
+        }
+        // The real path: the event carries rewardsStatus = "Enabled", which is what turns the marks on.
+        activity.onEventsLoaded(OrganizerMvpLoad(listOf(mvpEvent()), OrganizerMvpDataSource.BACKEND))
+        shadowOf(Looper.getMainLooper()).idle()
+        return activity
+    }
+
+    private fun rows(activity: ManageRewardsActivity): List<View> {
+        val host = activity.findViewById<LinearLayout>(R.id.mrw_reward_host)
+        return (0 until host.childCount).map { host.getChildAt(it) }
+    }
+
+    @Test
+    fun eachRewardStateRendersItsOwnMarkAndItsOwnTrack() {
+        val activity = threeStates()
+        val rows = rows(activity)
+        assertEquals(3, rows.size)
+
+        // AVAILABLE: quiet dot + word, track drawn from the ratio.
+        assertEquals("Available", rows[0].findViewById<TextView>(R.id.mrw_reward_badge).text.toString())
+        assertEquals(View.VISIBLE, rows[0].findViewById<View>(R.id.mrw_reward_status_dot).visibility)
+        assertEquals(View.VISIBLE, rows[0].findViewById<View>(R.id.mrw_reward_progress).visibility)
+
+        // DISABLED: strong pill, no dot, no track to draw.
+        assertEquals("Disabled", rows[1].findViewById<TextView>(R.id.mrw_reward_badge).text.toString())
+        assertEquals(View.GONE, rows[1].findViewById<View>(R.id.mrw_reward_status_dot).visibility)
+        assertEquals(View.GONE, rows[1].findViewById<View>(R.id.mrw_reward_progress).visibility)
+
+        // OUT OF STOCK: the loud error pill, and the track is full rather than hidden.
+        assertEquals(
+            activity.getString(R.string.reward_details_out_of_stock),
+            rows[2].findViewById<TextView>(R.id.mrw_reward_badge).text.toString(),
+        )
+        assertEquals(View.GONE, rows[2].findViewById<View>(R.id.mrw_reward_status_dot).visibility)
+        val full = rows[2].findViewById<ProgressBar>(R.id.mrw_reward_progress)
+        assertEquals(View.VISIBLE, full.visibility)
+        assertEquals(full.max, full.progress)
+    }
+
+    @Test
+    fun theCardIsTheEditTarget_withAChevron_andNoRemoveButtonOnIt() {
+        val activity = threeStates()
+        val card = activity.findViewById<View>(R.id.mrw_reward_edit)
+
+        assertEquals(true, card.isClickable)
+        assertEquals(View.VISIBLE, card.findViewById<View>(R.id.mrw_reward_chevron).visibility)
+        // Remove lives in the edit sheet now, not on the card.
+        assertEquals(null, card.findViewById<View>(R.id.mrw_reward_remove))
+    }
+
+    // ---- v1.63: a disabled card names its cause, and neither cause takes the actions away
+
+    @Test
+    fun rewardsSwitchOff_saysWhy_andBothCardActionsStillWork() {
+        val activity = build()
+        activity.rewardsServiceOverride = FakeRewardsService().apply {
+            rewardsSettings = false
+            rewards = listOf(activeReward())
+        }
+        activity.onEventsLoaded(
+            OrganizerMvpLoad(listOf(mvpEvent().copy(rewardsStatus = "Disabled")), OrganizerMvpDataSource.BACKEND),
+        )
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // The event-level switch is off: the pill says which thing is off, not just "Disabled".
+        assertEquals(
+            activity.getString(R.string.manage_rewards_badge_rewards_off),
+            activity.findViewById<TextView>(R.id.mrw_reward_badge).text.toString(),
+        )
+
+        activity.findViewById<View>(R.id.mrw_reward_edit).performClick()
+        assertEquals(
+            activity.getString(R.string.manage_rewards_edit_reward),
+            (ShadowAlertDialog.getLatestAlertDialog() as AlertDialog).titleText(),
+        )
+        ShadowAlertDialog.getLatestAlertDialog().findViewById<View>(R.id.mrw_reward_remove).performClick()
+        assertEquals(
+            activity.getString(R.string.manage_rewards_remove_reward),
+            (ShadowAlertDialog.getLatestAlertDialog() as AlertDialog).titleText(),
+        )
+    }
+
+    @Test
+    fun theRewardsOwnInactiveStatus_stillSaysDisabled() {
+        val activity = build()
+        activity.rewardsServiceOverride = FakeRewardsService().apply {
+            rewards = listOf(activeReward().copy(status = RewardStatus.INACTIVE))
+        }
+        // The event's own rewards status is Enabled, so the pill's cause is the reward, not the switch.
+        activity.onEventsLoaded(OrganizerMvpLoad(listOf(mvpEvent()), OrganizerMvpDataSource.BACKEND))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(
+            activity.getString(R.string.manage_rewards_badge_disabled),
+            activity.findViewById<TextView>(R.id.mrw_reward_badge).text.toString(),
+        )
+    }
+
+    @Test
+    fun aRewardWithNoClaimsYet_drawsNoTrack_andTheLineStatesIt() {
+        val activity = build()
+        activity.rewardsServiceOverride = FakeRewardsService().apply {
+            rewards = listOf(reward("Fresh item", claimed = 0, total = 10))
+        }
+        activity.onEventsLoaded(OrganizerMvpLoad(listOf(mvpEvent()), OrganizerMvpDataSource.BACKEND))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // The card is live (Available), so a missing track is the zero-claim rule, not a blocked card.
+        assertEquals(
+            activity.getString(R.string.manage_rewards_badge_available),
+            activity.findViewById<TextView>(R.id.mrw_reward_badge).text.toString(),
+        )
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.mrw_reward_progress).visibility)
+        assertEquals("0/10 claimed", activity.findViewById<TextView>(R.id.mrw_reward_stock).text.toString())
     }
 }
