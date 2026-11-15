@@ -50,7 +50,6 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
         ScanPurposeType(getString(R.string.scan_purpose_type_event_entry), ScanPurposeCode.ENTRY, "Event"),
         ScanPurposeType(getString(R.string.scan_purpose_type_session_attendance), ScanPurposeCode.ATTENDANCE, "Session"),
         ScanPurposeType(getString(R.string.scan_purpose_type_booth_visit), ScanPurposeCode.BOOTH_VISIT, "Booth"),
-        ScanPurposeType(getString(R.string.scan_purpose_type_session_visit), ScanPurposeCode.SESSION_VISIT, "Session"),
         ScanPurposeType(getString(R.string.scan_purpose_type_benefit_claim), ScanPurposeCode.BENEFIT_CLAIM, "Benefit"),
         ScanPurposeType(getString(R.string.scan_purpose_type_reward_redemption), ScanPurposeCode.REWARD_REDEMPTION_SCAN, "Reward"),
         ScanPurposeType(getString(R.string.scan_purpose_type_event_exit), ScanPurposeCode.EXIT, "Event"),

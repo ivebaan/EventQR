@@ -73,9 +73,6 @@ res/drawable/bg_input.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,cross-feature: 
 res/drawable/bg_input_filled.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,cross-feature: WP3+WP6
 res/drawable/bg_logout_button.xml,drawable,WP2,0,0,0,0,0,0,0,0,0,0,0,0,0,single-package
 res/drawable/bg_notification_badge_count.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,cross-feature: WP2+WP3+WP4a
-res/drawable/bg_notification_card_read.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,single-package
-res/drawable/bg_notification_card_unread.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,single-package
-res/drawable/bg_notification_unread_dot.xml,drawable,WP6,0,0,0,0,2,0,0,0,0,0,0,0,0,single-package
 res/drawable/bg_organizer_events_screen.xml,drawable,WP6,0,0,0,0,5,0,0,0,0,0,0,0,0,cross-feature: WP1+WP2+WP3+WP4a+WP4b
 res/drawable/bg_outline_button.xml,drawable,WP6,0,0,0,0,0,0,0,0,0,0,0,0,0,cross-feature: WP1+WP2+WP6
 res/drawable/bg_password_requirements.xml,drawable,WP1,0,0,0,0,0,0,0,0,0,0,0,0,0,single-package
@@ -243,7 +240,6 @@ res/layout/activity_my_event_requests.xml,layout,WP2,0,0,4,0,0,0,0,0,0,0,0,0,0,l
 res/layout/activity_new_password.xml,layout,WP1,0,0,10,5,0,0,0,0,0,0,0,0,0,listed in spec I
 res/layout/activity_organizer_dashboard.xml,layout,WP4a,0,0,28,1,0,0,0,0,3,7,0,0,0,listed in spec I
 res/layout/activity_organizer_events.xml,layout,WP4a,0,0,14,0,0,0,0,0,0,0,0,0,0,listed in spec I
-res/layout/activity_organizer_notifications.xml,layout,WP4a,0,0,12,0,0,0,0,0,0,0,0,0,0,listed in spec I
 res/layout/activity_qr_credential.xml,layout,WP2,0,0,30,3,0,0,1,0,1,4,0,0,0,listed in spec I
 res/layout/activity_qr_display.xml,layout,WP2,0,0,28,2,0,0,1,0,1,4,0,0,0,listed in spec I
 res/layout/activity_request_event.xml,layout,WP2,0,0,8,3,0,0,0,0,2,2,0,0,0,listed in spec I
@@ -275,7 +271,6 @@ res/layout/include_skeleton_profile.xml,layout,WP2,0,0,0,5,0,0,0,0,0,0,0,0,0,lis
 res/layout/item_admin_account.xml,layout,WP1,0,0,4,2,0,0,0,0,0,1,0,0,0,listed in spec I
 res/layout/item_admin_audit_log.xml,layout,WP1,0,0,5,2,0,0,0,0,0,0,0,0,0,listed in spec I
 res/layout/item_claimed_reward.xml,layout,WP2,0,0,5,0,0,0,0,0,0,0,0,0,0,listed in spec I
-res/layout/item_notification.xml,layout,WP6,0,0,10,1,0,0,0,0,0,0,0,0,0,listed in spec I
 res/layout/item_organizer_attendee.xml,layout,WP4a,0,0,5,0,0,0,0,0,0,1,0,0,0,listed in spec I
 res/layout/item_portal_option.xml,layout,WP6,0,0,6,0,0,0,0,0,0,0,0,0,0,listed in spec I
 res/layout/item_registration.xml,layout,WP3,0,0,3,1,0,0,0,0,0,1,0,0,0,listed in spec I
@@ -303,7 +298,6 @@ java/com/thedavelopers/eventqr/features/organizer/events/EditEventDetailsActivit
 java/com/thedavelopers/eventqr/features/organizer/events/EventManagementHubActivity.kt,kotlin,WP4b,0,0,0,0,0,0,0,0,0,0,66,0,0,
 java/com/thedavelopers/eventqr/features/organizer/events/ManageEventsActivity.kt,kotlin,WP4b,0,0,0,0,0,0,0,0,0,0,1,0,0,
 java/com/thedavelopers/eventqr/features/organizer/idtemplate/IdTemplateSettingsActivity.kt,kotlin,WP5b,0,0,0,0,0,0,0,0,0,0,102,2,0,
-java/com/thedavelopers/eventqr/features/organizer/notifications/NotificationManagementActivity.kt,kotlin,WP4b,0,0,0,0,0,0,0,0,0,0,7,2,0,
 java/com/thedavelopers/eventqr/features/organizer/reports/EventReportsActivity.kt,kotlin,WP5a,0,0,0,0,0,0,0,0,0,0,142,15,0,
 java/com/thedavelopers/eventqr/features/organizer/reports/ReportPreviewActivity.kt,kotlin,WP5a,0,0,0,0,0,0,0,0,0,0,93,30,0,
 java/com/thedavelopers/eventqr/features/organizer/rewards/ManageRewardsActivity.kt,kotlin,WP5b,0,0,0,0,0,0,0,0,0,0,98,0,0,

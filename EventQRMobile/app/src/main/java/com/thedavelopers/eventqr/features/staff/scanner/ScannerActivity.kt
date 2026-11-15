@@ -1602,7 +1602,8 @@ open class ScannerActivity : AppCompatActivity(), ScannerContract.View, TextureV
     private fun ScanPurposeResponse.displayName(): String = when (code) {
         ScanPurposeCode.ENTRY -> getString(R.string.scan_purpose_type_event_entry)
         ScanPurposeCode.ATTENDANCE -> getString(R.string.scan_purpose_type_session_attendance)
-        ScanPurposeCode.BOOTH_VISIT -> getString(R.string.scan_purpose_type_booth_visit)
+        // An event can have several booths, so the organizer's name is what tells them apart.
+        ScanPurposeCode.BOOTH_VISIT -> name.takeIf { it.isNotBlank() } ?: getString(R.string.scan_purpose_type_booth_visit)
         ScanPurposeCode.BENEFIT_CLAIM -> getString(R.string.scan_purpose_type_benefit_claim)
         ScanPurposeCode.REWARD_REDEMPTION, ScanPurposeCode.REWARD_REDEMPTION_SCAN -> getString(R.string.scan_purpose_type_reward_redemption)
         ScanPurposeCode.EXIT -> getString(R.string.scan_purpose_type_event_exit)

@@ -50,7 +50,13 @@ public final class OrganizerDtos {
                                             boolean countedAsRegistered, Integer registrationNumber) {
     }
 
-    public record TransactionEntry(String type, String timestamp) {
+    /**
+     * One timeline row. {@code scanPurposeName} is the custom scan purpose title (e.g. "Booth A") when the
+     * transaction carried one, otherwise {@code null}. Purpose-agnostic by design: any transaction type may carry
+     * a name (matching {@code TransactionResponse.scanPurposeName}); clients decide which types display it, the
+     * server applies no type gate.
+     */
+    public record TransactionEntry(String type, String timestamp, String scanPurposeName) {
     }
 
     public record OrganizerTransactionResponse(UUID transactionId, UUID eventId, String eventTitle, UUID attendeeId,

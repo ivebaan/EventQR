@@ -90,10 +90,7 @@
             android:layout_marginTop="@dimen/space_12"
             android:layout_marginEnd="@dimen/ui_gutter"
             android:layout_marginBottom="@dimen/space_16"
-            android:drawablePadding="@dimen/space_8"
-            android:drawableTint="@color/ui_on_primary"
             android:minHeight="@dimen/ui_button_height"
-            android:text="@string/ui_organizer_add_staff"
-            app:drawableStartCompat="@drawable/ic_ui_add" />
+            android:text="@string/ui_organizer_add_staff" />
     </LinearLayout>
 </LinearLayout>

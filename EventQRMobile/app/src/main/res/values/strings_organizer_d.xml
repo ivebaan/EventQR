@@ -9,8 +9,6 @@
     <string name="organizer_selected_event">Selected Event</string>
     <string name="search_attendees_title">Search Attendees</string>
     <string name="organizer_dashboard_events_load_failed">Organizer events could not be loaded.</string>
-    <string name="notification_mgmt_all_types">All types</string>
-    <string name="notification_mgmt_all_events">All events</string>
     <string name="organizer_event_id_missing">Event ID is missing.</string>
     <string name="organizer_no_event_selected">No event selected</string>
     <string name="organizer_no_event_selected_hint">%1$s Open this screen from My Events or the event hub.</string>

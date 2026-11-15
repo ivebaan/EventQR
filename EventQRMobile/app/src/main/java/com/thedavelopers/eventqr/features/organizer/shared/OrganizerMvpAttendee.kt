@@ -3,6 +3,8 @@ package com.thedavelopers.eventqr.features.organizer
 data class OrganizerMvpTransactionEntry(
     val type: String,
     val timestamp: String? = null,
+    /** Booth/session purpose name ("Booth A"); null on older backends that do not send it. */
+    val scanPurposeName: String? = null,
 )
 
 data class OrganizerMvpAttendee(

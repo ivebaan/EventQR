@@ -31,7 +31,6 @@ import com.thedavelopers.eventqr.features.organizer.showMissingEventScreen
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import com.thedavelopers.eventqr.ui.components.showInlineError
 import com.thedavelopers.eventqr.ui.icons.AppIcons
-import com.thedavelopers.eventqr.ui.icons.FieldIcons
 import kotlinx.coroutines.launch
 
 open class ManageUsersActivity : AppCompatActivity() {
@@ -92,7 +91,6 @@ open class ManageUsersActivity : AppCompatActivity() {
         emptyStateText = findViewById(R.id.txtEmptyStaff)
         addStaffFooter = findViewById(R.id.staffAddFooter)
         errorStrip = findViewById(R.id.errorStaffAssignment)
-        FieldIcons.apply(findViewById(R.id.btnAddStaff))
         // §5.16: Retry re-runs the same load; the strip clears as the attempt starts.
         findViewById<View>(R.id.btnErrorStripRetry).setOnClickListener {
             errorStrip.visibility = View.GONE

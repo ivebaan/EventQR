@@ -393,24 +393,7 @@ class ComponentInflationTest {
         // The production inflater is AppCompat's, so the compat drawable attribute lands on the button.
         val compatButton = appCompatInflate(R.layout.activity_staff_assignment)
             .findViewById<Button>(R.id.btnAddStaff)
-        FieldIcons.apply(compatButton)
-        val glyph = compatButton.compoundDrawablesRelative[0]
-        assertNotNull("the footer button lost its leading glyph", glyph)
-        assertEquals(
-            "the footer button's glyph must be ic_ui_add",
-            R.drawable.ic_ui_add,
-            org.robolectric.Shadows.shadowOf(glyph).createdFromResId,
-        )
-        assertEquals(
-            "the glyph must be pinned to the 20dp field ink",
-            context.resources.getDimensionPixelSize(R.dimen.ui_field_icon),
-            glyph.bounds.width(),
-        )
-        assertEquals(
-            "the glyph must take ui_on_primary",
-            androidx.core.content.ContextCompat.getColor(context, R.color.ui_on_primary),
-            androidx.core.widget.TextViewCompat.getCompoundDrawableTintList(compatButton)?.defaultColor,
-        )
+        assertNull("the Add staff button is text only", compatButton.compoundDrawablesRelative[0])
 
         val ids = root.descendantIdNames(context)
         val stripIds = listOf("eventStrip", "eventStripTitle", "eventStripAction")
@@ -1182,7 +1165,7 @@ class ComponentInflationTest {
 
         val column = scroll.getChildAt(0) as LinearLayout
 
-        assertEquals("four blocks: head, table, review note, actions", 4, column.childCount)
+        assertEquals("five blocks: head, table, review note, spacer, actions", 5, column.childCount)
         assertEquals("block 2 is the shared head", R.id.oeHead, column.getChildAt(0).id)
         assertEquals("block 4 is the review note", R.id.oedReviewNote, column.getChildAt(2).id)
 
@@ -1252,7 +1235,7 @@ class ComponentInflationTest {
         }
 
         // Actions: primary first, ghost beneath, 8dp apart, both full width - not an equal pair.
-        val actions = column.getChildAt(3) as ViewGroup
+        val actions = column.getChildAt(4) as ViewGroup
         assertEquals(2, actions.childCount)
         val primary = actions.getChildAt(0)
         val ghost = actions.getChildAt(1)
@@ -1347,6 +1330,40 @@ class ComponentInflationTest {
      * carries Registered / Capacity / Available on the pass-stub step, so the two screens no longer
      * print the same three numbers and the hub stays the place that owns them (§6.4 v1.20).
      */
+    @Test
+    fun eventDetailsActions_sitAtTheBottomOnTallScreens_andStayReachableOnShortOnes() {
+        val context = themedContext()
+        val density = context.resources.displayMetrics.density
+        val width = (360 * density).toInt()
+        fun measured(heightDp: Int): View {
+            val height = (heightDp * density).toInt()
+            val root = inflate(R.layout.activity_organizer_event_details, LinearLayout(context))
+            root.findViewById<View>(R.id.oedContent).visibility = View.VISIBLE
+            root.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            root.layout(0, 0, width, height)
+            return root
+        }
+        val tall = measured(2400)
+        val content = tall.findViewById<ViewGroup>(R.id.oedContent)
+        val reports = tall.findViewById<View>(R.id.oedActionReports)
+        val inner = content.getChildAt(0)
+        assertTrue(
+            "reports bottom ${(reports.parent as View).bottom + reports.bottom} must sit at the content bottom ${content.height}",
+            content.height - inner.bottom <= 1 && inner.height >= content.height,
+        )
+
+        val short = measured(300)
+        val shortContent = short.findViewById<ViewGroup>(R.id.oedContent)
+        val shortInner = shortContent.getChildAt(0)
+        assertTrue(
+            "on a short screen the content must be taller than the viewport so it scrolls",
+            shortInner.height > shortContent.height,
+        )
+    }
+
     @Test
     fun statsStrips_neverStretchToTheScreen() {
         val context = themedContext()

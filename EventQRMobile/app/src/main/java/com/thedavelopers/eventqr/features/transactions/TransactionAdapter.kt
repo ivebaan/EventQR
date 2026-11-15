@@ -65,7 +65,7 @@ internal fun bindScanTransactionRow(itemView: View, item: TransactionResponse) {
     val isApproved = item.transactionResult.name == "APPROVED"
     val isEarned = item.pointsDelta >= 0
 
-    titleView.text = mapTransactionTitle(titleView, item.transactionType)
+    titleView.text = mapTransactionTitle(titleView, item.transactionType, item.scanPurposeName)
     eventView.text = item.eventTitle?.takeIf { it.isNotBlank() }
         ?: context.getString(R.string.common_untitled_event)
     timeView.text = item.scannedAt?.let { transactionDisplayFormatter.format(it) }
@@ -102,15 +102,34 @@ internal fun bindScanTransactionRow(itemView: View, item: TransactionResponse) {
 }
 
 // One label per scan purpose, so a row never falls back to a raw enum name ("Id print").
-internal fun mapTransactionTitle(view: TextView, type: TransactionType): String = when (type) {
-    TransactionType.ENTRY -> view.context.getString(R.string.item_transaction_log_entry)
-    TransactionType.ATTENDANCE -> view.context.getString(R.string.scan_purpose_type_session_attendance)
-    TransactionType.BOOTH_VISIT -> view.context.getString(R.string.scan_purpose_type_booth_visit)
-    TransactionType.SESSION_VISIT -> view.context.getString(R.string.scan_purpose_type_session_visit)
-    TransactionType.BENEFIT_CLAIM -> view.context.getString(R.string.scan_purpose_type_benefit_claim)
-    TransactionType.REWARD_REDEMPTION_SCAN, TransactionType.REWARD_REDEMPTION ->
-        view.context.getString(R.string.scan_purpose_type_reward_redemption)
-    TransactionType.EXIT -> view.context.getString(R.string.scan_purpose_type_event_exit)
-    TransactionType.ID_PRINT -> view.context.getString(R.string.scan_purpose_type_id_print)
-    TransactionType.REGISTRATION -> view.context.getString(R.string.ui_staff_result_registration)
+internal fun mapTransactionTitle(
+    view: TextView,
+    type: TransactionType,
+    purposeName: String? = null,
+): String {
+    val typeLabel = when (type) {
+        TransactionType.ENTRY -> view.context.getString(R.string.item_transaction_log_entry)
+        TransactionType.ATTENDANCE -> view.context.getString(R.string.scan_purpose_type_session_attendance)
+        TransactionType.BOOTH_VISIT -> view.context.getString(R.string.scan_purpose_type_booth_visit)
+        TransactionType.SESSION_VISIT -> view.context.getString(R.string.scan_purpose_type_session_visit)
+        TransactionType.BENEFIT_CLAIM -> view.context.getString(R.string.scan_purpose_type_benefit_claim)
+        TransactionType.REWARD_REDEMPTION_SCAN, TransactionType.REWARD_REDEMPTION ->
+            view.context.getString(R.string.scan_purpose_type_reward_redemption)
+        TransactionType.EXIT -> view.context.getString(R.string.scan_purpose_type_event_exit)
+        TransactionType.ID_PRINT -> view.context.getString(R.string.scan_purpose_type_id_print)
+        TransactionType.REGISTRATION -> view.context.getString(R.string.ui_staff_result_registration)
+    }
+    return boothPurposeTitle(type, purposeName, typeLabel)
+}
+
+/**
+ * An event can run several booth/session purposes ("Booth A", "Booth B"), so those rows are named
+ * by the purpose. Every other type keeps its generic label. The organizer backend falls back to the
+ * raw enum code when a purpose has no name, so a code never renders as if it were a name.
+ */
+internal fun boothPurposeTitle(type: TransactionType, purposeName: String?, typeLabel: String): String {
+    if (type != TransactionType.BOOTH_VISIT && type != TransactionType.SESSION_VISIT) return typeLabel
+    val name = purposeName?.trim().orEmpty()
+    val isRawCode = TransactionType.values().none { it.name.equals(name, ignoreCase = true) }
+    return if (name.isNotEmpty() && isRawCode) name else typeLabel
 }

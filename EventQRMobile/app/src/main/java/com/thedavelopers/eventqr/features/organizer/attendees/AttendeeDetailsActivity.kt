@@ -227,7 +227,7 @@ open class AttendeeDetailsActivity : AppCompatActivity() {
                         val textStack = LinearLayout(this@AttendeeDetailsActivity).apply {
                             orientation = LinearLayout.VERTICAL
                             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                            val label = transactionTypeLabel(this@AttendeeDetailsActivity, entry.type)
+                            val label = transactionTypeLabel(this@AttendeeDetailsActivity, entry.type, entry.scanPurposeName)
                             val time = formatEntryTimestamp(entry.timestamp)
                             addView(TextView(this@AttendeeDetailsActivity).apply {
                                 text = label

@@ -14,6 +14,7 @@ import com.thedavelopers.eventqr.features.admin.users.AdminAccountManagementActi
 import com.thedavelopers.eventqr.features.admin.users.CreateAdminAccountActivity
 import com.thedavelopers.eventqr.features.attendee.AttendeeProfileActivity
 import com.thedavelopers.eventqr.features.organizer.dashboard.OrganizerDashboardActivity
+import com.thedavelopers.eventqr.features.organizer.notifications.OrganizerNotificationsActivity
 import com.thedavelopers.eventqr.features.staff.EventRegistrationsActivity
 import com.thedavelopers.eventqr.features.staff.StaffAssignedEventsActivity
 import com.thedavelopers.eventqr.features.staff.StaffDashboardActivity
@@ -45,6 +46,11 @@ class RoleGuardMatrixTest {
         EventRegistrationsActivity::class.java,
         StaffAssignedEventsActivity::class.java,
         StaffAttendeeDetailsActivity::class.java,
+    )
+
+    /** A different floor from the staff list: STAFF ranks below ORGANIZER, so it is denied here. */
+    private val organizerFloorActivities: List<Class<out Activity>> = listOf(
+        OrganizerNotificationsActivity::class.java,
     )
 
     @Before
@@ -138,6 +144,33 @@ class RoleGuardMatrixTest {
                 assertFalse("${activity.simpleName} / ${role.name}", denies(activity, role))
             }
         }
+    }
+
+    @Test
+    fun organizerFloorActivities_denyAttendeeAndStaff() {
+        listOf(AccountRole.ATTENDEE, AccountRole.STAFF).forEach { role ->
+            organizerFloorActivities.forEach { activity ->
+                assertTrue("${activity.simpleName} / ${role.name}", denies(activity, role))
+            }
+        }
+    }
+
+    @Test
+    fun organizerFloorActivities_admitOrganizerAndAbove() {
+        listOf(
+            AccountRole.ORGANIZER,
+            AccountRole.ADMIN,
+            AccountRole.SUPER_ADMIN,
+        ).forEach { role ->
+            organizerFloorActivities.forEach { activity ->
+                assertFalse("${activity.simpleName} / ${role.name}", denies(activity, role))
+            }
+        }
+    }
+
+    @Test
+    fun organizerFloorActivities_failClosedOnUnknownRole() {
+        assertTrue(denies(OrganizerNotificationsActivity::class.java, null))
     }
 
     @Test

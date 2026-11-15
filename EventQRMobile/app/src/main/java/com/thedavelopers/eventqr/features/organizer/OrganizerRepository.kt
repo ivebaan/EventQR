@@ -2,6 +2,7 @@ package com.thedavelopers.eventqr.features.organizer
 
 import android.content.Context
 import com.thedavelopers.eventqr.R
+import androidx.annotation.VisibleForTesting
 import com.google.gson.JsonElement
 import com.thedavelopers.eventqr.core.api.ApiClient
 import com.thedavelopers.eventqr.core.api.NetworkResult
@@ -30,6 +31,7 @@ import com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationRe
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRequest
 import com.thedavelopers.eventqr.features.scanpurposes.model.dto.ScanPurposeRequest
 import com.thedavelopers.eventqr.features.scanpurposes.model.dto.ScanPurposeResponse
+import com.thedavelopers.eventqr.features.transactions.boothPurposeTitle
 import com.thedavelopers.eventqr.features.transactions.model.dto.TransactionResponse
 import com.thedavelopers.eventqr.features.users.model.dto.UserRequest
 import java.io.File
@@ -299,12 +301,6 @@ open class OrganizerRepository(private val context: Context) {
         notificationType: NotificationType? = null,
     ): NetworkResult<List<NotificationResponse>> = safeApiCall { apiService.getMyNotifications(eventId = eventId, notificationType = notificationType) }
 
-    suspend fun markNotificationRead(notificationId: String): NetworkResult<NotificationResponse> =
-        safeApiCall { apiService.markNotificationRead(notificationId) }
-
-    suspend fun markAllNotificationsRead(): NetworkResult<Unit> =
-        safeApiCall { apiService.markAllNotificationsRead() }
-
     private fun detectImageMediaType(file: File): String? {
         val header = ByteArray(8)
         val count = runCatching {
@@ -399,18 +395,32 @@ private fun OrganizerAttendeeDto.toMvpAttendee(context: Context): OrganizerMvpAt
     registrationNumber = registrationNumber,
 )
 
-private fun JsonElement.toMvpTransactionEntry(): OrganizerMvpTransactionEntry? = when {
+@VisibleForTesting
+internal fun JsonElement.toMvpTransactionEntry(): OrganizerMvpTransactionEntry? = when {
     isJsonPrimitive && asJsonPrimitive.isString ->
         OrganizerMvpTransactionEntry(type = asString, timestamp = null)
     isJsonObject -> {
-        val type = asJsonObject.get("type")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
-        val timestamp = asJsonObject.get("timestamp")?.takeIf { it.isJsonPrimitive }?.asString
-        if (type.isBlank()) null else OrganizerMvpTransactionEntry(type = type, timestamp = timestamp?.takeIf { it.isNotBlank() })
+        fun stringField(name: String): String? = asJsonObject.get(name)
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+            ?.asString
+        val type = stringField("type").orEmpty()
+        val timestamp = stringField("timestamp")
+        val scanPurposeName = stringField("scanPurposeName")?.takeIf(String::isNotBlank)
+        if (type.isBlank()) {
+            null
+        } else {
+            OrganizerMvpTransactionEntry(
+                type = type,
+                timestamp = timestamp?.takeIf { it.isNotBlank() },
+                scanPurposeName = scanPurposeName,
+            )
+        }
     }
     else -> null
 }
 
-private fun OrganizerTransactionDto.toMvpTransaction(context: Context, fallbackEventTitle: String): OrganizerMvpTransaction {
+@VisibleForTesting
+internal fun OrganizerTransactionDto.toMvpTransaction(context: Context, fallbackEventTitle: String): OrganizerMvpTransaction {
     val rejected = resultStatus == TransactionResult.REJECTED
     val displayType = transactionType.toDisplayType(context)
     return OrganizerMvpTransaction(
@@ -425,7 +435,7 @@ private fun OrganizerTransactionDto.toMvpTransaction(context: Context, fallbackE
         staffName = staffName ?: context.getString(R.string.organizer_repo_staff_not_available),
         staffEmail = staffEmail.orEmpty(),
         scanPurpose = scanPurpose ?: displayType,
-        type = displayType,
+        type = boothPurposeTitle(transactionType, scanPurpose, displayType),
         timestamp = DateFormatters.formatInstant(createdTimestamp),
         status = if (rejected) "Rejected" else "Approved",
         message = message ?: if (rejected) context.getString(R.string.organizer_repo_scan_rejected) else context.getString(R.string.organizer_repo_type_recorded, displayType),
@@ -568,7 +578,7 @@ private fun String.toScanPurposeCode(): com.thedavelopers.eventqr.core.api.dto.S
     else -> com.thedavelopers.eventqr.core.api.dto.ScanPurposeCode.ENTRY
 }
 
-private fun TransactionResponse.toMvpTransaction(
+internal fun TransactionResponse.toMvpTransaction(
     context: Context,
     eventTitle: String,
     attendeeName: String?,
@@ -588,7 +598,7 @@ private fun TransactionResponse.toMvpTransaction(
         staffName = context.getString(R.string.organizer_repo_staff_not_available),
         staffEmail = "",
         scanPurpose = purpose?.name ?: displayType,
-        type = displayType,
+        type = boothPurposeTitle(transactionType, scanPurposeName, displayType),
         timestamp = DateFormatters.formatInstant(scannedAt),
         status = if (rejected) "Rejected" else "Successful",
         message = reason ?: if (rejected) context.getString(R.string.organizer_repo_scan_rejected) else context.getString(R.string.organizer_repo_type_recorded, displayType),

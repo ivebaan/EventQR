@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ScrollView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -520,12 +521,13 @@ open class ManageRewardsActivity : AppCompatActivity() {
                 setText(R.string.manage_rewards_remove)
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setPadding(0, 0, 0, 0)
+                contentDescription = getString(R.string.manage_rewards_remove_named, reward.name)
                 form.addView(
                     this,
                     LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = dimenPx(R.dimen.space_md) },
+                    ).apply { topMargin = dimenPx(R.dimen.space_24) },
                 )
             }
         } else {
@@ -540,7 +542,12 @@ open class ManageRewardsActivity : AppCompatActivity() {
         root.findViewById<View>(R.id.dialogBody).visibility = View.GONE
         val actions = root.findViewById<LinearLayout>(R.id.dialogActions)
         form.setPadding(0, dimenPx(R.dimen.space_md), 0, 0)
-        root.addView(form, root.indexOfChild(actions))
+        // Scrolls when the form outgrows the window (small phone, keyboard up); the actions stay pinned below.
+        root.addView(
+            ScrollView(this).apply { addView(form) },
+            root.indexOfChild(actions),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
 
         rewardDialog?.dismiss()
         val dialog = AlertDialog.Builder(this).setView(root).create()

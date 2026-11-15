@@ -87,8 +87,8 @@ class OrganizerDashboardRenderTest {
         assertEquals(
             listOf(
                 "Attendance" to "20%",
-                "Booked ahead" to "30",
-                "Attended now" to "80",
+                "Sign-ups" to "30",
+                "Attending" to "80",
             ),
             activity.headCells(),
         )
@@ -118,8 +118,8 @@ class OrganizerDashboardRenderTest {
         assertEquals(
             listOf(
                 "Attendance" to "--",
-                "Booked ahead" to "0",
-                "Attended now" to "80",
+                "Sign-ups" to "0",
+                "Attending" to "80",
             ),
             activity.headCells(),
         )

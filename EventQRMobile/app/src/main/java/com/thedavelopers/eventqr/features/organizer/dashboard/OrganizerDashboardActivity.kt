@@ -34,7 +34,7 @@ import com.thedavelopers.eventqr.features.organizer.selectedEventId
 import com.thedavelopers.eventqr.features.organizer.summaryCard
 import com.thedavelopers.eventqr.features.organizer.events.EventManagementHubActivity
 import com.thedavelopers.eventqr.features.organizer.events.ManageEventsActivity
-import com.thedavelopers.eventqr.features.organizer.notifications.NotificationManagementActivity
+import com.thedavelopers.eventqr.features.organizer.notifications.OrganizerNotificationsActivity
 import com.thedavelopers.eventqr.features.notifications.model.dto.NotificationResponse
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import com.thedavelopers.eventqr.ui.components.ListRowBinder
@@ -164,7 +164,7 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
                 ),
                 onTabSelected = { index -> portals.getOrNull(index)?.let(::switchToPortal) },
                 onBellClick = {
-                    startActivity(Intent(this, NotificationManagementActivity::class.java))
+                    startActivity(Intent(this, OrganizerNotificationsActivity::class.java))
                 },
             ),
         )

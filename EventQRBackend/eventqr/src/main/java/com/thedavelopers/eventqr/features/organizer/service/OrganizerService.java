@@ -313,8 +313,10 @@ public class OrganizerService {
         List<TransactionLog> logs = transactionLogRepository.findByEventId(eventId);
         List<EventRegistration> registrations = registrationRepository.findByEventId(eventId);
         Map<UUID, Integer> points = earnedPoints(eventId, registrations);
+        Map<UUID, String> scanPurposeNames = scanPurposeNames(eventId);
         return registrations.stream()
-                .map(registration -> toAttendee(registration, logs, points.getOrDefault(registration.getAttendeeUserId(), 0)))
+                .map(registration -> toAttendee(registration, logs, points.getOrDefault(registration.getAttendeeUserId(), 0),
+                        scanPurposeNames))
                 .toList();
     }
 
@@ -362,7 +364,8 @@ public class OrganizerService {
                     .orElseThrow(() -> new ResourceNotFoundException("Attendee not found for event"));
         }
         return toAttendee(registration, transactionLogRepository.findByEventId(eventId),
-                earnedPoints(eventId, List.of(registration)).getOrDefault(registration.getAttendeeUserId(), 0));
+                earnedPoints(eventId, List.of(registration)).getOrDefault(registration.getAttendeeUserId(), 0),
+                scanPurposeNames(eventId));
     }
 
     private RegistrationStatus parseAttendeeStatus(String status) {
@@ -937,7 +940,25 @@ public class OrganizerService {
         return totals;
     }
 
-    private OrganizerAttendeeResponse toAttendee(EventRegistration registration, List<TransactionLog> logs, int pointsEarned) {
+    /** Scan purpose id -> custom name for one event. One batched query, so attendees never fan out per log. */
+    private Map<UUID, String> scanPurposeNames(UUID eventId) {
+        Map<UUID, String> names = new java.util.HashMap<>();
+        for (ScanPurpose purpose : scanPurposeRepository.findByEventId(eventId)) {
+            names.put(purpose.getId(), purpose.getName());
+        }
+        return names;
+    }
+
+    private static String scanPurposeName(Map<UUID, String> names, UUID scanPurposeId) {
+        if (scanPurposeId == null) {
+            return null;
+        }
+        String name = names.get(scanPurposeId);
+        return name == null || name.isBlank() ? null : name;
+    }
+
+    private OrganizerAttendeeResponse toAttendee(EventRegistration registration, List<TransactionLog> logs, int pointsEarned,
+                                                 Map<UUID, String> purposeNamesById) {
         List<TransactionLog> attendeeLogs = logs.stream()
                 .filter(log -> log.getRegistrationId().equals(registration.getId()))
                 .sorted(Comparator.comparing(TransactionLog::getScannedAt, Comparator.nullsLast(Comparator.reverseOrder())))
@@ -952,7 +973,8 @@ public class OrganizerService {
                 format(registration.getRegisteredAt()),
                 registration.getQrCredentialId() == null ? "Pending" : "Issued",
                 attendeeLogs.stream().filter(log -> log.getTransactionResult() == TransactionResult.APPROVED)
-                        .map(log -> new TransactionEntry(log.getTransactionType().name(), format(log.getScannedAt())))
+                        .map(log -> new TransactionEntry(log.getTransactionType().name(), format(log.getScannedAt()),
+                                scanPurposeName(purposeNamesById, log.getScanPurposeId())))
                         .limit(5).toList(),
                 attendeeLogs.stream().filter(log -> log.getTransactionResult() == TransactionResult.REJECTED)
                         .map(TransactionLog::getReason).limit(5).toList(),

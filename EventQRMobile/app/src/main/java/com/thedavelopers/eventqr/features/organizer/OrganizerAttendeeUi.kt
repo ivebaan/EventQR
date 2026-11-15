@@ -2,6 +2,8 @@ package com.thedavelopers.eventqr.features.organizer
 
 import android.content.Context
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.api.dto.TransactionType
+import com.thedavelopers.eventqr.features.transactions.boothPurposeTitle
 import java.util.Locale
 
 /**
@@ -57,16 +59,20 @@ internal fun OrganizerMvpAttendee.statusLabel(context: Context): String = when (
     else -> statusBucket()
 }
 
-internal fun transactionTypeLabel(context: Context, value: String): String = when (value.trim().uppercase(Locale.ENGLISH)) {
-    "ENTRY" -> context.getString(R.string.txn_type_entry)
-    "ATTENDANCE" -> context.getString(R.string.txn_type_attendance)
-    "BENEFIT_CLAIM" -> context.getString(R.string.txn_type_benefit_claim)
-    "BOOTH_VISIT", "SESSION_VISIT" -> context.getString(R.string.txn_type_booth_session_visit)
-    "REWARD_REDEMPTION_SCAN", "REWARD_REDEMPTION" -> context.getString(R.string.txn_type_reward_redemption)
-    "EXIT" -> context.getString(R.string.txn_type_exit)
-    "ID_PRINT" -> context.getString(R.string.txn_type_id_printing)
-    "REGISTRATION", "REGISTRATION_LOOKUP" -> context.getString(R.string.txn_type_registration)
-    else -> value
+internal fun transactionTypeLabel(context: Context, value: String, purposeName: String? = null): String {
+    val boothLabel = context.getString(R.string.txn_type_booth_session_visit)
+    return when (value.trim().uppercase(Locale.ENGLISH)) {
+        "ENTRY" -> context.getString(R.string.txn_type_entry)
+        "ATTENDANCE" -> context.getString(R.string.txn_type_attendance)
+        "BENEFIT_CLAIM" -> context.getString(R.string.txn_type_benefit_claim)
+        "BOOTH_VISIT" -> boothPurposeTitle(TransactionType.BOOTH_VISIT, purposeName, boothLabel)
+        "SESSION_VISIT" -> boothPurposeTitle(TransactionType.SESSION_VISIT, purposeName, boothLabel)
+        "REWARD_REDEMPTION_SCAN", "REWARD_REDEMPTION" -> context.getString(R.string.txn_type_reward_redemption)
+        "EXIT" -> context.getString(R.string.txn_type_exit)
+        "ID_PRINT" -> context.getString(R.string.txn_type_id_printing)
+        "REGISTRATION", "REGISTRATION_LOOKUP" -> context.getString(R.string.txn_type_registration)
+        else -> value
+    }
 }
 
 internal fun OrganizerMvpAttendee.matchesOrganizerAttendeeQuery(query: String, filter: String): Boolean {

@@ -400,6 +400,13 @@
                     tools:text="The location certificate is missing. Re-submit with the permit attached." />
             </LinearLayout>
 
+            <!-- Takes the spare height on tall screens so the actions sit at the bottom; collapses to 0
+                 on short ones, where the actions stay in the scroll flow and never clip. -->
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
             <!-- Actions: one primary, one ghost, stacked. An equal pair states no priority. -->
             <LinearLayout
                 android:layout_width="match_parent"

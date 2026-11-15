@@ -20,8 +20,8 @@
     <string name="ui_organizer_attended">Attended</string>
     <string name="ui_organizer_live_now">Live now</string>
     <string name="ui_organizer_attendance_rate">Attendance</string>
-    <string name="ui_organizer_upcoming_signups">Booked ahead</string>
-    <string name="ui_organizer_attended_now">Attended now</string>
+    <string name="ui_organizer_upcoming_signups">Sign-ups</string>
+    <string name="ui_organizer_attended_now">Attending</string>
     <string name="ui_organizer_percent_value">%1$d%%</string>
     <string name="ui_organizer_redeemed">Redeemed</string>
     <string name="ui_organizer_next_event">Next event</string>

@@ -82,6 +82,7 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
             setTextAppearance(R.style.TextAppearance_EventQR_Type_Label)
             gravity = android.view.Gravity.CENTER
             minHeight = dimenOffset(R.dimen.ui_touch_min)
+            minWidth = dimenOffset(R.dimen.ui_touch_min)
             setPadding(dimenOffset(R.dimen.space_12), 0, dimenOffset(R.dimen.space_12), 0)
             setOnClickListener { markAllRead() }
         }

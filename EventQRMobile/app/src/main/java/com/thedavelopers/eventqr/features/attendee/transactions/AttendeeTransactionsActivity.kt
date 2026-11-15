@@ -1,17 +1,8 @@
 package com.thedavelopers.eventqr.features.attendee
 
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.PopupWindow
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -19,11 +10,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.ui.components.EventPickerField
+import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.icons.AppIcons
-import com.thedavelopers.eventqr.ui.theme.color
-import com.thedavelopers.eventqr.ui.theme.dimenOffset
-import com.thedavelopers.eventqr.ui.theme.setTextSizeRes
-import com.thedavelopers.eventqr.ui.theme.strong
 import com.thedavelopers.eventqr.features.transactions.TransactionHistoryAdapter
 import com.thedavelopers.eventqr.features.transactions.TransactionHistoryRow
 
@@ -41,19 +30,14 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
     private lateinit var emptyText: EventQrEmptyState
     private lateinit var errorStrip: View
     private lateinit var retryButton: TextView
-    private lateinit var filterSpinner: Spinner
+    private lateinit var eventPicker: EventPickerField
     private lateinit var summaryCountText: TextView
     private lateinit var recyclerView: RecyclerView
-    private lateinit var spinnerArrow: ImageView
-    private lateinit var cardSelectedEvent: View
-    private lateinit var txtSelectedEventTitle: TextView
 
     private var allTransactions: List<TransactionHistoryRow> = emptyList()
-    private var eventFilterOptions: List<Pair<String?, String>> = emptyList()
+    private var eventFilterOptions: List<EventPickerOption> = emptyList()
     private var selectedEventId: String? = null
     private var pendingInitialEventId: String? = null
-    private var eventPopup: PopupWindow? = null
-    private var isEventDropdownOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,17 +51,20 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
         emptyText = findViewById(R.id.txtTransactionsEmpty)
         errorStrip = findViewById(R.id.errorTransactions)
         retryButton = findViewById(R.id.btnTransactionsRetry)
-        filterSpinner = findViewById(R.id.spinnerEventFilter)
-        cardSelectedEvent = findViewById(R.id.cardSelectedEvent)
-        txtSelectedEventTitle = findViewById(R.id.txtSelectedEventTitle)
-        spinnerArrow = findViewById(R.id.spinnerArrow)
+        eventPicker = findViewById(R.id.event_picker_field)
         summaryCountText = findViewById(R.id.txtHistoryTransactionCount)
         recyclerView = findViewById(R.id.recyclerTransactions)
 
         findViewById<View>(R.id.nav_header_back).setOnClickListener { finish() }
         retryButton.setOnClickListener { presenter.load() }
         swipeRefresh.setOnRefreshListener { presenter.load() }
-        cardSelectedEvent.setOnClickListener { setEventDropdownOpen(!isEventDropdownOpen) }
+
+        // The picker's ids are all Strings: "All events" is the reserved sentinel, mapped back to
+        // null (no filter) so the row filtering keeps its existing meaning.
+        eventPicker.setOnEventSelectedListener { id ->
+            selectedEventId = id.takeUnless { it == ALL_EVENTS_OPTION_ID }
+            applySelectedFilter()
+        }
 
         pendingInitialEventId = intent.getStringExtra(EXTRA_EVENT_ID).orEmpty().ifBlank { null }
 
@@ -94,12 +81,15 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
 
     override fun onDestroy() {
         presenter.detach()
-        eventPopup?.dismiss()
+        eventPicker.dismissPopup()
         super.onDestroy()
     }
 
     override fun showLoading(isLoading: Boolean) {
         val hasRows = adapter.itemCount > 0
+        // The picker shows its loading copy on a first load only: a refresh over readable rows keeps
+        // the chosen event's title on screen and the field usable.
+        if (isLoading && !hasRows) eventPicker.setLoading(true)
         if (!swipeRefresh.isRefreshing) {
             // A refresh over readable rows keeps them on screen; the skeleton is a first-load state.
             skeletonLoading.visibility = if (isLoading && !hasRows) View.VISIBLE else View.GONE
@@ -122,6 +112,10 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
     override fun showError(message: String) {
         swipeRefresh.isRefreshing = false
         skeletonLoading.visibility = View.GONE
+        // A failed fetch must not leave the field on its loading copy: the presenter skips
+        // renderTransactions() when a failed load brings no rows, so the picker is restored here
+        // for both branches.
+        bindPickerOptions()
 
         if (adapter.itemCount > 0) {
             // The rows are still readable: keep them and report the failed refresh in the flow,
@@ -168,103 +162,37 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
                 rows.firstNotNullOfOrNull { it.eventTitle?.takeIf(String::isNotBlank) }.orEmpty().lowercase()
             }
 
-        val options = mutableListOf<Pair<String?, String>>()
-        options += null to getString(R.string.user_transaction_history_all_events)
+        val options = mutableListOf(allEventsOption())
         groupedEvents.forEach { (eventId, eventItems) ->
             val title = eventItems.firstNotNullOfOrNull { it.eventTitle?.takeIf(String::isNotBlank) }
                 ?: getString(R.string.ui_attendee_untitled_event)
-            options += eventId to title
+            options += EventPickerOption(id = eventId, title = title)
         }
         eventFilterOptions = options
 
-        val labels = options.map { it.second }
-        val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels).also {
-            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        // The first load honours the requested event, when its transactions are present; after that
+        // the attendee's own choice wins, so a refresh never silently widens back to All events.
+        pendingInitialEventId?.let { initial ->
+            selectedEventId = initial.takeIf { id -> options.any { it.id == id } }
+            pendingInitialEventId = null
         }
-        filterSpinner.adapter = spinnerAdapter
+        // A refresh can drop the selected event's last row: the filter falls back to All events.
+        if (selectedEventId != null && options.none { it.id == selectedEventId }) selectedEventId = null
 
-        val initialEventId = pendingInitialEventId
-        val initialIndex = if (initialEventId == null) 0 else options.indexOfFirst { it.first == initialEventId }.coerceAtLeast(0)
-        selectedEventId = options[initialIndex].first
-        pendingInitialEventId = null
-        filterSpinner.setSelection(initialIndex, false)
-        bindSelectedEventHeader()
-
-        filterSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                bindSelectedEventHeader()
-            }
-
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
-        }
+        bindPickerOptions()
     }
 
-    private fun bindSelectedEventHeader() {
-        val option = eventFilterOptions.getOrNull(filterSpinner.selectedItemPosition)
-        txtSelectedEventTitle.text = option?.second ?: getString(R.string.user_transaction_history_all_events)
-    }
+    private fun allEventsOption() =
+        EventPickerOption(ALL_EVENTS_OPTION_ID, getString(R.string.user_transaction_history_all_events))
 
-    private fun renderEventDropdown() {
-        eventPopup?.dismiss()
-        eventPopup = PopupWindow(buildEventDropdownView(), cardSelectedEvent.width.takeIf { it > 0 } ?: ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
-            isOutsideTouchable = true
-            elevation = dimenOffset(R.dimen.elevation_overlay).toFloat()
-            setBackgroundDrawable(ColorDrawable(color(R.color.transparent)))
-            setOnDismissListener { isEventDropdownOpen = false; normalizeChevron(spinnerArrow, false) }
-        }
+    private fun bindPickerOptions() {
+        // Before the first load (and after a failed one) the field still offers All events, so it
+        // never sits on its loading copy or on an empty list.
+        val options = eventFilterOptions.ifEmpty { listOf(allEventsOption()) }
+        // A reload landing under a live list closes it first, so text and popup cannot disagree.
+        eventPicker.dismissPopup()
+        eventPicker.setOptions(options, selectedEventId ?: ALL_EVENTS_OPTION_ID)
     }
-
-    private fun buildEventDropdownView(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundResource(R.drawable.bg_card)
-        eventFilterOptions.forEachIndexed { index, option ->
-            addView(LinearLayout(this@AttendeeTransactionsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(
-                    dimenOffset(R.dimen.space_lg), dimenOffset(R.dimen.space_14),
-                    dimenOffset(R.dimen.space_lg), dimenOffset(R.dimen.space_14),
-                )
-                setBackgroundColor(if (index == filterSpinner.selectedItemPosition) color(R.color.accent_container) else color(R.color.surface))
-                setOnClickListener {
-                    filterSpinner.setSelection(index, false)
-                    bindSelectedEventHeader()
-                    renderEventDropdown()
-                    setEventDropdownOpen(false)
-                    selectedEventId = option.first
-                    applySelectedFilter()
-                }
-                addView(TextView(this@AttendeeTransactionsActivity).apply {
-                    text = option.second
-                    setTextColor(if (index == filterSpinner.selectedItemPosition) color(R.color.primary) else color(R.color.text_primary))
-                    setTextSizeRes(R.dimen.type_body)
-                    strong()
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                })
-            })
-        }
-    }
-
-    private fun setEventDropdownOpen(open: Boolean) {
-        if (open && eventFilterOptions.isEmpty()) return
-        if (open) {
-            if (eventPopup == null || cardSelectedEvent.width > 0 && eventPopup?.width != cardSelectedEvent.width) renderEventDropdown()
-            isEventDropdownOpen = true
-            normalizeChevron(spinnerArrow, true)
-            eventPopup?.showAsDropDown(cardSelectedEvent, 0, 0)
-        } else {
-            eventPopup?.dismiss()
-            isEventDropdownOpen = false
-            normalizeChevron(spinnerArrow, false)
-        }
-    }
-
-    private fun normalizeChevron(view: View, open: Boolean) {
-        if (view is ImageView) {
-            view.rotation = if (open) 180f else 0f
-        }
-    }
-
 
     private fun applySelectedFilter() {
         val filtered = if (selectedEventId.isNullOrBlank()) {
@@ -284,5 +212,13 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
         recyclerView.visibility = if (filtered.isEmpty()) View.GONE else View.VISIBLE
 
         summaryCountText.text = if (filtered.size == 1) "1 transaction" else "${filtered.size} transactions"
+    }
+
+    private companion object {
+        /**
+         * The picker's ids are always Strings, so its "All events" row is a reserved sentinel the
+         * activity maps back to `null` (no filter), as it did with the old spinner's null id.
+         */
+        const val ALL_EVENTS_OPTION_ID = "__all_events__"
     }
 }

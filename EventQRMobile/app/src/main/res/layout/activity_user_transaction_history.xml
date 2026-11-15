@@ -2,12 +2,13 @@
 <!--
     Transaction history (§6.2, list language §5.5) - retires Gen A.
 
-        Top bar, then the event filter as a filled 48dp field (not a spinner inside a card)
+        Top bar, then the event filter as the shared searchable EventPickerField (plan 5.2)
         The count as one quiet line, not a summary card
         Transaction rows on the flat page with the shared skeleton and empty state
 
     Deleted: bg_history_summary_card, the selected-event card wrapping a hidden spinner, the
-    three copy-pasted skeleton cards and the centred empty block.
+    three copy-pasted skeleton cards and the centred empty block. Also deleted: the 48dp
+    selector card, its chevron and its hidden Spinner - now the shared EventPickerField.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -34,46 +35,15 @@
             android:id="@+id/txtFilterEventLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:labelFor="@id/cardSelectedEvent"
+            android:labelFor="@id/event_picker_field"
             android:text="@string/ui_attendee_registered_event"
             android:textAppearance="@style/TextAppearance.EventQR.Type.FieldLabel" />
 
-        <LinearLayout
-            android:id="@+id/cardSelectedEvent"
+        <com.thedavelopers.eventqr.ui.components.EventPickerField
+            android:id="@id/event_picker_field"
             android:layout_width="match_parent"
-            android:layout_height="@dimen/ui_field_search_height"
-            android:layout_marginTop="@dimen/space_sm"
-            android:background="@drawable/bg_ui_field"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="@dimen/space_lg"
-            android:paddingEnd="@dimen/space_md">
-
-            <TextView
-                android:id="@+id/txtSelectedEventTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="@string/user_transaction_history_all_events"
-                android:textAppearance="@style/TextAppearance.EventQR.Type.Body"
-                android:textColor="@color/ui_text_primary" />
-
-            <ImageView
-                android:id="@+id/spinnerArrow"
-                style="@style/Widget.EventQR.Ui.Selector.Caret"
-                android:layout_marginStart="@dimen/space_sm"
-                android:importantForAccessibility="no" />
-        </LinearLayout>
-
-        <Spinner
-            android:id="@+id/spinnerEventFilter"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm" />
 
         <TextView
             android:id="@+id/txtHistoryTransactionCount"
