@@ -53,6 +53,9 @@ public class ChangePasswordService {
         if (!newPassword.equals(confirmPassword)) {
             throw new BadRequestException("Passwords do not match");
         }
+        if (newPassword.equals(currentPassword)) {
+            throw new BadRequestException("New password must be different from the current password");
+        }
         PasswordValidator.requireValid(newPassword);
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));

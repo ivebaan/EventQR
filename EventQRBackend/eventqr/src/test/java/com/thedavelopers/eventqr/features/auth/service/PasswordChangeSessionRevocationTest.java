@@ -214,6 +214,20 @@ class PasswordChangeSessionRevocationTest {
     }
 
     @Test
+    void changePassword_sameNewPasswordIsABadRequest_andChangesNothing() {
+        String current = user.getPasswordHash();
+
+        assertThatThrownBy(() -> changePasswordService.changePassword(user.getId(), OLD_PASSWORD, OLD_PASSWORD,
+                OLD_PASSWORD))
+                .isInstanceOf(com.thedavelopers.eventqr.shared.exceptions.BadRequestException.class)
+                .hasMessageContaining("must be different");
+
+        assertThat(user.getPasswordHash()).isEqualTo(current);
+        assertThat(revocations).isEmpty();
+        assertThat(refreshByHash).isEmpty();
+    }
+
+    @Test
     void resetPassword_killsEveryEarlierAccessToken() throws Exception {
         String token = login();
         assertThat(authenticates(token)).isTrue();

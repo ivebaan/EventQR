@@ -37,6 +37,7 @@
     <string name="password_policy_hint">Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character</string>
     <string name="password_error_current_required">Enter your current password</string>
     <string name="password_error_mismatch">Passwords do not match</string>
+    <string name="change_password_same_as_current">New password must be different from your current password</string>
     <string name="reset_password_code_sent_to">We sent a 6-digit code to %1$s</string>
     <string name="reset_password_code_label">Verification code</string>
     <string name="reset_password_code_invalid">Enter the 6-digit code from your email</string>

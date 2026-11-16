@@ -435,7 +435,7 @@ internal fun notificationRowTone(isRead: Boolean): NotificationRowTone {
 @DrawableRes
 internal fun resolveNotificationIcon(type: NotificationType?): Int = when (type) {
     NotificationType.STAFF_ASSIGNMENT -> AppIcons.People
-    NotificationType.REGISTRATION_NEW -> AppIcons.Success
+    NotificationType.REGISTRATION_NEW, NotificationType.REGISTRATION_CONFIRMED -> AppIcons.Success
     NotificationType.CAPACITY_WARNING, NotificationType.CAPACITY_FULL -> AppIcons.Warning
     NotificationType.REWARD_EXHAUSTED -> AppIcons.Reward
     NotificationType.REWARD_REDEEMED -> AppIcons.Reward

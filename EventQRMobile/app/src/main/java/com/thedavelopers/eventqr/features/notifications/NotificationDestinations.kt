@@ -33,6 +33,8 @@ internal fun notificationDestinationFor(type: NotificationType?, eventId: String
             if (eventId.isNullOrBlank()) NotificationDestination.ATTENDEE_REQUESTS
             else NotificationDestination.ORGANIZER_EVENT_DETAILS
         eventId.isNullOrBlank() -> null
+        // The attendee's own confirmation always opens the attendee view, whatever the reader's role.
+        type == NotificationType.REGISTRATION_CONFIRMED -> NotificationDestination.ATTENDEE_EVENT_DETAIL
         else -> NotificationDestination.ORGANIZER_HUB
     }
 
@@ -52,6 +54,8 @@ internal fun resolvedDestination(
             if (organizer && !eventId.isNullOrBlank()) NotificationDestination.ORGANIZER_EVENT_DETAILS
             else NotificationDestination.ATTENDEE_REQUESTS
         eventId.isNullOrBlank() -> null
+        // The attendee's own confirmation always opens the attendee view, whatever the reader's role.
+        type == NotificationType.REGISTRATION_CONFIRMED -> NotificationDestination.ATTENDEE_EVENT_DETAIL
         organizer -> NotificationDestination.ORGANIZER_HUB
         else -> NotificationDestination.ATTENDEE_EVENT_DETAIL
     }

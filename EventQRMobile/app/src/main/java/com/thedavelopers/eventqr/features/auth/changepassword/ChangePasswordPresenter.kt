@@ -54,6 +54,11 @@ class ChangePasswordPresenter() {
             return
         }
 
+        if (newPassword == currentPassword) {
+            view?.showNewPasswordError(string(R.string.change_password_same_as_current))
+            return
+        }
+
         if (newPassword != confirmPassword) {
             view?.showConfirmPasswordError(string(R.string.password_error_mismatch))
             return

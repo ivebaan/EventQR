@@ -217,16 +217,19 @@ class NotificationsScreenComposeTest {
     fun approvedNotifications_useTheCheckMarkIcon() {
         var eventApprovedIcon = 0
         var scanApprovedIcon = 0
+        var registrationConfirmedIcon = 0
 
         composeTestRule.setContent {
             EventQrTheme {
                 eventApprovedIcon = resolveNotificationIcon(NotificationType.EVENT_APPROVED)
                 scanApprovedIcon = resolveNotificationIcon(NotificationType.SCAN_APPROVED)
+                registrationConfirmedIcon = resolveNotificationIcon(NotificationType.REGISTRATION_CONFIRMED)
             }
         }
 
         assertEquals(AppIcons.Success, eventApprovedIcon)
         assertEquals(AppIcons.Success, scanApprovedIcon)
+        assertEquals(AppIcons.Success, registrationConfirmedIcon)
     }
     private fun notification(
         status: NotificationStatus = NotificationStatus.PENDING,

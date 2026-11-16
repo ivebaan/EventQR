@@ -134,6 +134,32 @@ class ChangePasswordPresenterTest {
     }
 
     @Test
+    fun submitChange_sameAsCurrent_rejectedWithoutNetworkCall() {
+        val view = RecordingView()
+        val presenter = ChangePasswordPresenter()
+        presenter.attach(view, ApplicationProvider.getApplicationContext())
+        var calls = 0
+        presenter.repository = object : AuthRepository(ApplicationProvider.getApplicationContext()) {
+            override suspend fun changePassword(
+                currentPassword: String,
+                newPassword: String,
+                confirmPassword: String,
+            ): NetworkResult<Unit> {
+                calls++
+                return NetworkResult.Success(Unit)
+            }
+        }
+
+        presenter.submitChange("SamePass1!", "SamePass1!", "SamePass1!")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(string(R.string.change_password_same_as_current), view.newPasswordErrors.last())
+        assertEquals(0, calls)
+        assertTrue(view.loading.isEmpty())
+        assertEquals(0, view.successCount)
+    }
+
+    @Test
     fun submitChange_noLowercase_rejectedWithoutNetworkCall() {
         val view = RecordingView()
         val presenter = ChangePasswordPresenter()

@@ -67,6 +67,24 @@ class NotificationDestinationsTest {
     }
 
     @Test
+    fun `a registration confirmation is the attendee detail whatever the reader's role`() {
+        assertEquals(
+            NotificationDestination.ATTENDEE_EVENT_DETAIL,
+            notificationDestinationFor(NotificationType.REGISTRATION_CONFIRMED, "event-1"),
+        )
+        assertEquals(
+            NotificationDestination.ATTENDEE_EVENT_DETAIL,
+            resolvedDestination(NotificationType.REGISTRATION_CONFIRMED, "event-1", organizer = true),
+        )
+        assertEquals(
+            NotificationDestination.ATTENDEE_EVENT_DETAIL,
+            resolvedDestination(NotificationType.REGISTRATION_CONFIRMED, "event-1", organizer = false),
+        )
+        assertNull(notificationDestinationFor(NotificationType.REGISTRATION_CONFIRMED, null))
+        assertNull(resolvedDestination(NotificationType.REGISTRATION_CONFIRMED, " ", organizer = true))
+    }
+
+    @Test
     fun `a rejection without an event id reaches the request list for every role`() {
         assertEquals(
             NotificationDestination.ATTENDEE_REQUESTS,

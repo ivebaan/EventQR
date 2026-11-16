@@ -60,6 +60,19 @@ class NotificationServiceTest {
     }
 
     @Test
+    void createRegistrationConfirmationNotification_usesAttendeeConfirmationType() {
+        UUID eventId = UUID.randomUUID();
+        UUID attendee = UUID.randomUUID();
+        notificationService.createRegistrationConfirmationNotification(eventId, attendee, "Tech Talk");
+        ArgumentCaptor<Notification> cap = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(cap.capture());
+        Notification n = cap.getValue();
+        assertThat(n.getNotificationType()).isEqualTo(NotificationType.REGISTRATION_CONFIRMED);
+        assertThat(n.getRecipientUserId()).isEqualTo(attendee);
+        assertThat(n.getStatus()).isEqualTo(NotificationStatus.SENT);
+    }
+
+    @Test
     void createCapacityWarningNotification_at80Percent() {
         UUID eventId = UUID.randomUUID();
         notificationService.createCapacityWarningNotification(eventId, UUID.randomUUID(), "Concert", 80, 100);

@@ -272,7 +272,7 @@ public void createEventStartingSoonNotifications(List<com.thedavelopers.eventqr.
         Notification n = new Notification();
         n.setEventId(eventId);
         n.setRecipientUserId(attendeeUserId);
-        n.setNotificationType(NotificationType.REGISTRATION_NEW);
+        n.setNotificationType(NotificationType.REGISTRATION_CONFIRMED);
         n.setTitle("Registered: " + eventTitle);
         n.setMessage("You're registered for '" + eventTitle + "'. Your QR pass is ready.");
         n.setStatus(NotificationStatus.SENT);
