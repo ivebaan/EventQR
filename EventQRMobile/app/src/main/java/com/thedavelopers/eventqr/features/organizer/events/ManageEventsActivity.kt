@@ -1,5 +1,6 @@
 package com.thedavelopers.eventqr.features.organizer.events
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
@@ -10,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -17,6 +19,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.util.EventCardPresenter
 import com.thedavelopers.eventqr.features.attendee.RequestEventActivity
 import com.thedavelopers.eventqr.features.organizer.NAV_EVENTS
@@ -36,6 +40,7 @@ import com.thedavelopers.eventqr.ui.components.asFilterChips
 import com.thedavelopers.eventqr.ui.icons.FieldIcons
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -52,6 +57,20 @@ import java.util.Locale
  */
 open class ManageEventsActivity : AppCompatActivity() {
 
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: OrganizerRepository
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: EventQrEmptyState
@@ -64,6 +83,7 @@ open class ManageEventsActivity : AppCompatActivity() {
     private var isFirstResume = true
     private var eventsSource: OrganizerMvpLoad<List<OrganizerMvpEvent>> =
         OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
+    private var loadEventsJob: Job? = null
     private val organizerZone: ZoneId = ZoneId.of("Asia/Manila")
     private val dayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("d", Locale.ENGLISH)
     private val monthFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH)
@@ -71,7 +91,7 @@ open class ManageEventsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
         setContentView(R.layout.activity_organizer_events)
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
@@ -95,7 +115,12 @@ open class ManageEventsActivity : AppCompatActivity() {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
-        swipeRefresh.setOnRefreshListener { loadEvents() }
+        // Pull-to-refresh bypasses both snapshots: the user asked for fresh rows.
+        swipeRefresh.setOnRefreshListener {
+            repository.invalidateEvents()
+            loadEvents(forceNetwork = true)
+        }
+
         asFilterChips(
             findViewById(R.id.chipAll),
             findViewById(R.id.chipUpcoming),
@@ -159,16 +184,40 @@ open class ManageEventsActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadEvents() {
-        if (!swipeRefresh.isRefreshing) {
-            showLoading()
-        }
-        lifecycleScope.launch {
-            eventsSource = repository.loadEventsForMvp()
+    /** Test handle: a pull (forceNetwork) bypasses the persisted snapshot. */
+    @VisibleForTesting
+    internal fun loadEvents(forceNetwork: Boolean = false) {
+        // A newer reload (swipe/retry/resume) replaces the in-flight one, so a read that started
+        // before the snapshot was invalidated cannot repaint stale rows when it lands.
+        loadEventsJob?.cancel()
+        loadEventsJob = lifecycleScope.launch {
+            // The persisted list paints first: a cold open shows the rows with no skeleton, and the
+            // refresh lands under them. A pull (forceNetwork) asks the network for the first frame.
+            if (!forceNetwork && allEvents.isEmpty()) paintSnapshot()
+            if (!swipeRefresh.isRefreshing) showLoading()
+            val load = repository.loadEventsForMvp()
             swipeRefresh.isRefreshing = false
-            allEvents = eventsSource.data
+            if (load.source == OrganizerMvpDataSource.ERROR && allEvents.isNotEmpty()) {
+                // A failed refresh keeps the painted rows instead of replacing them with the error
+                // state: it only owns the screen when there is nothing to show.
+                return@launch
+            }
+            eventsSource = load
+            allEvents = load.data
             renderFilteredEvents()
         }
+    }
+
+    /** Paints the persisted `organizer/events` answer so the list is readable before the network. */
+    private suspend fun paintSnapshot() {
+        val events = cache.read<List<OrganizerMvpEvent>>(
+            OrganizerSnapshots.EVENTS,
+            OrganizerSnapshots.EVENTS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return
+        eventsSource = OrganizerMvpLoad(events, OrganizerMvpDataSource.BACKEND)
+        allEvents = events
+        renderFilteredEvents()
     }
 
     private fun getFilteredByStatus(): List<OrganizerMvpEvent> {

@@ -77,6 +77,8 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.layoutBottomNavHost).addView(bottomNav(NAV_ATTENDEES))
 
         swipeRefresh.setOnRefreshListener {
+            // Pull-to-refresh bypasses the shared snapshot: the user asked for fresh rows.
+            repository.invalidateEvents()
             // No event yet means the event list failed to load: a pull retries it.
             if (selectedEvent == null) loadEvents() else refreshSelectedEventAttendees()
         }
@@ -103,8 +105,9 @@ open class AttendeeManagementActivity : AppCompatActivity() {
     }
 
     private fun loadEvents() {
-        // A pull during the first load (or a second pull) must not start a parallel events load.
-        if (eventsLoadJob?.isActive == true) return
+        // A newer reload (pull, retry) replaces the in-flight one: a read that started before the
+        // snapshot was invalidated must not repaint stale rows when it lands.
+        eventsLoadJob?.cancel()
         eventsLoadJob = lifecycleScope.launch {
             val eventsLoad = repository.loadApprovedOrganizerEvents()
             if (eventsLoad.source == OrganizerMvpDataSource.ERROR) {
@@ -166,7 +169,9 @@ open class AttendeeManagementActivity : AppCompatActivity() {
     }
     private fun refreshSelectedEventAttendees() {
         val event = selectedEvent ?: return
-        lifecycleScope.launch {
+        // Same replacement rule as loadEvents: the newest pull owns the render.
+        eventsLoadJob?.cancel()
+        eventsLoadJob = lifecycleScope.launch {
             val currentEventId = event.id
             val eventsLoad = repository.loadApprovedOrganizerEvents()
             // A failed fetch must not run resolveSelectedEvent on an empty list: that would save "no selection"

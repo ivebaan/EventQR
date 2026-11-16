@@ -10,6 +10,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.ui.components.EventPickerField
 import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.icons.AppIcons
@@ -44,7 +46,7 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
         setContentView(R.layout.activity_user_transaction_history)
         configureAttendeeBottomNav(AttendeeBottomNavItem.PROFILE)
 
-        presenter = TransactionHistoryPresenter(this, repository)
+        presenter = TransactionHistoryPresenter(this, repository, SessionManager(this), LastKnownCache.get(this))
 
         swipeRefresh = findViewById(R.id.swipeRefreshTransactions)
         skeletonLoading = findViewById(R.id.skeletonLoading)
@@ -56,13 +58,15 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
         recyclerView = findViewById(R.id.recyclerTransactions)
 
         findViewById<View>(R.id.nav_header_back).setOnClickListener { finish() }
-        retryButton.setOnClickListener { presenter.load() }
-        swipeRefresh.setOnRefreshListener { presenter.load() }
+        retryButton.setOnClickListener { presenter.load(forceNetwork = true) }
+        swipeRefresh.setOnRefreshListener { presenter.load(forceNetwork = true) }
 
         // The picker's ids are all Strings: "All events" is the reserved sentinel, mapped back to
         // null (no filter) so the row filtering keeps its existing meaning.
         eventPicker.setOnEventSelectedListener { id ->
             selectedEventId = id.takeUnless { it == ALL_EVENTS_OPTION_ID }
+            // An explicit choice settles the first-load request: it must not be re-applied over it.
+            pendingInitialEventId = null
             applySelectedFilter()
         }
 
@@ -137,7 +141,7 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
             getString(R.string.user_transaction_history_unable_to_load_transactions),
             message.ifBlank { getString(R.string.ui_attendee_load_error_body) },
         )
-        emptyText.setAction(getString(R.string.ui_attendee_retry)) { presenter.load() }
+        emptyText.setAction(getString(R.string.ui_attendee_retry)) { presenter.load(forceNetwork = true) }
         recyclerView.visibility = View.GONE
         emptyText.visibility = View.VISIBLE
         emptyText.announceForAccessibility(
@@ -162,6 +166,7 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
                 rows.firstNotNullOfOrNull { it.eventTitle?.takeIf(String::isNotBlank) }.orEmpty().lowercase()
             }
 
+        val previousOptions = eventFilterOptions
         val options = mutableListOf(allEventsOption())
         groupedEvents.forEach { (eventId, eventItems) ->
             val title = eventItems.firstNotNullOfOrNull { it.eventTitle?.takeIf(String::isNotBlank) }
@@ -170,11 +175,20 @@ open class AttendeeTransactionsActivity : AppCompatActivity(), TransactionHistor
         }
         eventFilterOptions = options
 
+        // The enrichment repaint usually lands on the same set of events: rebinding the picker then
+        // would dismiss a popup the attendee has open, so only a changed set redraws it. The rows
+        // and the count still update through applySelectedFilter().
+        if (options == previousOptions) return
+
         // The first load honours the requested event, when its transactions are present; after that
         // the attendee's own choice wins, so a refresh never silently widens back to All events.
+        // A requested event whose only rows come from the deferred ledger read stays pending until
+        // that read lands, so the enrichment repaint cannot drop a preselection the full list honours.
         pendingInitialEventId?.let { initial ->
-            selectedEventId = initial.takeIf { id -> options.any { it.id == id } }
-            pendingInitialEventId = null
+            if (options.any { it.id == initial }) {
+                selectedEventId = initial
+                pendingInitialEventId = null
+            }
         }
         // A refresh can drop the selected event's last row: the filter falls back to All events.
         if (selectedEventId != null && options.none { it.id == selectedEventId }) selectedEventId = null

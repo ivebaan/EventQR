@@ -11,6 +11,8 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.features.registrations.RegisteredEventAdapter
 import com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationResponse
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
@@ -56,7 +58,7 @@ open class RegisteredEventsActivity : AppCompatActivity(), RegisteredEventsContr
             title = getString(R.string.ui_attendee_my_passes),
         )
 
-        presenter = RegisteredEventsPresenter(this, AttendeeRepository(this))
+        presenter = RegisteredEventsPresenter(this, AttendeeRepository(this), SessionManager(this), cache = LastKnownCache.get(this))
         swipeRefresh = findViewById(R.id.swipeRefreshRegisteredEvents)
         skeletonLoading = findViewById(R.id.skeletonLoading)
 
@@ -77,14 +79,14 @@ open class RegisteredEventsActivity : AppCompatActivity(), RegisteredEventsContr
         // §5.16: Retry re-runs the presenter's load; the current filter is re-applied on arrival.
         findViewById<View>(R.id.btnErrorStripRetry).setOnClickListener {
             errorStrip.visibility = View.GONE
-            presenter.load()
+            presenter.load(forceNetwork = true)
         }
 
         chipAll.setOnClickListener { selectFilter(RegisteredEventFilter.ALL) }
         chipUpcoming.setOnClickListener { selectFilter(RegisteredEventFilter.UPCOMING) }
         chipActive.setOnClickListener { selectFilter(RegisteredEventFilter.ACTIVE) }
         chipCompleted.setOnClickListener { selectFilter(RegisteredEventFilter.COMPLETED) }
-        swipeRefresh.setOnRefreshListener { presenter.load() }
+        swipeRefresh.setOnRefreshListener { presenter.load(forceNetwork = true) }
 
         adapter = RegisteredEventAdapter { registration -> openEventDetail(registration) }
         recyclerView = findViewById(R.id.recyclerRegisteredEvents)
@@ -225,7 +227,7 @@ open class RegisteredEventsActivity : AppCompatActivity(), RegisteredEventsContr
                 getString(R.string.ui_attendee_registrations_error_title),
                 getString(R.string.ui_attendee_load_error_body),
             )
-            emptyState.setAction(getString(R.string.ui_attendee_retry)) { presenter.load() }
+            emptyState.setAction(getString(R.string.ui_attendee_retry)) { presenter.load(forceNetwork = true) }
             recyclerView.visibility = View.GONE
             chipRow.visibility = View.GONE
         } else {

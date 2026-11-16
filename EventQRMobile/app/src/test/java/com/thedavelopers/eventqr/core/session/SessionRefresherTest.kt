@@ -29,6 +29,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.Base64
 import java.util.UUID
 
 /** The proactive session refresh rotates through POST auth/refresh (the old auth/refresh-token is gone). */
@@ -263,5 +264,97 @@ class SessionRefresherTest {
         server.takeRequest()
         assertEquals("Bearer new-access", server.takeRequest().getHeader("Authorization"))
         assertEquals("no extra refresh call", 4, server.requestCount)
+    }
+
+    @Test
+    fun aResumeInsideTheTenMinuteWindowSkipsTheRefresh_andAfterItRotates() {
+        server.enqueue(refreshOk())
+        server.enqueue(meOk("ATTENDEE"))
+        assertEquals(Rotation.ROTATED, refreshNow(SessionRefresher.RESUME_REFRESH_INTERVAL_MS).rotation)
+
+        nowMs += 5 * 60_000
+        assertEquals(Rotation.RECENT, refreshNow(SessionRefresher.RESUME_REFRESH_INTERVAL_MS).rotation)
+        assertEquals("no request inside the window", 2, server.requestCount)
+
+        nowMs += 6 * 60_000
+        server.enqueue(refreshOk("newer-access", "newer-refresh"))
+        server.enqueue(meOk("ATTENDEE"))
+        assertEquals(Rotation.ROTATED, refreshNow(SessionRefresher.RESUME_REFRESH_INTERVAL_MS).rotation)
+        assertEquals("newer-refresh", session.getRefreshToken())
+    }
+
+    @Test
+    fun theResumeWindowAlwaysRefreshesWithoutAToken_orOneCloseToExpiry() {
+        val now = 1_000_000L
+
+        assertEquals("no token at all", 0L, SessionRefresher.resumeIntervalMs(null, now))
+        assertEquals("blank token", 0L, SessionRefresher.resumeIntervalMs("  ", now))
+        assertEquals(
+            "expires inside the skew",
+            0L,
+            SessionRefresher.resumeIntervalMs(jwtExpiringAt(now / 1000 + 60), now),
+        )
+        assertEquals(
+            "already expired",
+            0L,
+            SessionRefresher.resumeIntervalMs(jwtExpiringAt(now / 1000 - 60), now),
+        )
+        assertEquals(
+            "plenty of life left",
+            SessionRefresher.RESUME_REFRESH_INTERVAL_MS,
+            SessionRefresher.resumeIntervalMs(jwtExpiringAt(now / 1000 + 30 * 60), now),
+        )
+        assertEquals(
+            "an unreadable token still uses the window",
+            SessionRefresher.RESUME_REFRESH_INTERVAL_MS,
+            SessionRefresher.resumeIntervalMs("old-access", now),
+        )
+    }
+
+    @Test
+    fun refreshNowKeepsItsForcedOneMinuteWindow() {
+        // The forced callers (401 recovery, an approved decision) still pass MIN_REFRESH_INTERVAL_MS.
+        server.enqueue(refreshOk())
+        server.enqueue(meOk("ATTENDEE"))
+        assertEquals(Rotation.ROTATED, refreshNow(SessionRefresher.MIN_REFRESH_INTERVAL_MS).rotation)
+
+        nowMs += 30_000
+        assertEquals(Rotation.RECENT, refreshNow(SessionRefresher.MIN_REFRESH_INTERVAL_MS).rotation)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun refreshIfStale_skipsWhileTheStoredTokenIsYoung_andSendsNothing() {
+        // A token with 30 minutes left, rotated a moment ago: a resume must not spend another refresh.
+        val access = jwtExpiringAt(nowMs / 1000 + 30 * 60)
+        session.saveTokens(access, "young-refresh")
+        rotator.adoptTokens(access, "young-refresh")
+
+        val result = runBlocking { SessionRefresher.refreshIfStale(rotator, api, session, nowMs) }
+
+        assertEquals(Rotation.RECENT, result.rotation)
+        assertEquals("no request on a young session", 0, server.requestCount)
+    }
+
+    @Test
+    fun refreshIfStale_rotatesWhenTheStoredTokenIsCloseToExpiry() {
+        // Inside EXPIRY_SKEW_MS, so the 10 minute window is not allowed to skip it.
+        val access = jwtExpiringAt(nowMs / 1000 + 60)
+        session.saveTokens(access, "old-refresh")
+        rotator.adoptTokens(access, "old-refresh")
+        server.enqueue(refreshOk())
+        server.enqueue(meOk("ATTENDEE"))
+
+        val result = runBlocking { SessionRefresher.refreshIfStale(rotator, api, session, nowMs) }
+
+        assertEquals(Rotation.ROTATED, result.rotation)
+        assertEquals("a rotation plus auth/me", 2, server.requestCount)
+    }
+
+    /** An unsigned JWT whose payload carries [expSeconds]. */
+    private fun jwtExpiringAt(expSeconds: Long): String {
+        val payload = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("""{"exp":$expSeconds}""".toByteArray())
+        return "header.$payload.signature"
     }
 }

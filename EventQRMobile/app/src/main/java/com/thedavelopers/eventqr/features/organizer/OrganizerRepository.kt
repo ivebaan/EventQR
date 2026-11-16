@@ -5,12 +5,16 @@ import com.thedavelopers.eventqr.R
 import androidx.annotation.VisibleForTesting
 import com.google.gson.JsonElement
 import com.thedavelopers.eventqr.core.api.ApiClient
+import com.thedavelopers.eventqr.core.api.ApiService
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.RegistrationStatus
 import com.thedavelopers.eventqr.core.api.dto.TransactionResult
 import com.thedavelopers.eventqr.core.api.dto.TransactionType
 import com.thedavelopers.eventqr.core.api.safeApiCall
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.util.DateFormatters
+import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.features.events.model.dto.EventApprovalRequest
 import com.thedavelopers.eventqr.features.events.model.dto.EventRequest
 import com.thedavelopers.eventqr.features.events.model.dto.EventResponse
@@ -51,12 +55,18 @@ enum class OrganizerMvpDataSource {
     ERROR,
 }
 
-open class OrganizerRepository(private val context: Context) {
-  private val apiService = ApiClient.getService(context)
-  // Cached in-memory event store (replaces OrganizerMvpPlaceholders cachedEvents)
-  private var cachedEvents: List<OrganizerMvpEvent> = emptyList()
+open class OrganizerRepository(
+    private val context: Context,
+    private val apiService: ApiService = ApiClient.getService(context),
+    private val eventsCache: OrganizerEventsCache = OrganizerEventsCache.shared,
+    private val currentUserId: () -> String? = { SessionManager(context).getUserId() },
+    private val lastKnownCache: LastKnownCache? = null,
+) {
+    // Shared, user-scoped snapshot of GET organizer/events (see OrganizerEventsCache).
+    // The persisted copy of the same answer: a cold open paints it before the network replies.
+    private val lastKnown by lazy { lastKnownCache ?: LastKnownCache.get(context.applicationContext ?: context) }
 
-    private val selectionPrefs = context.getSharedPreferences("organizer_mvp_selection", Context.MODE_PRIVATE)
+    private val selectionPrefs = context.getSharedPreferences(SELECTION_PREFS, Context.MODE_PRIVATE)
 
     private fun List<OrganizerMvpEvent>.manageable(): List<OrganizerMvpEvent> =
         filter {
@@ -73,21 +83,46 @@ open class OrganizerRepository(private val context: Context) {
      * [OrganizerMvpDataSource.ERROR] so screens show an error with Retry instead of "no events".
      */
     open suspend fun loadApprovedOrganizerEvents(): OrganizerMvpLoad<List<OrganizerMvpEvent>> {
-        val now = System.currentTimeMillis()
-        val ttlExpired = (now - lastCacheTime) > CACHE_TTL_MS
-        return if (cachedEvents.isNotEmpty() && !ttlExpired) {
-            OrganizerMvpLoad(cachedEvents.manageable(), OrganizerMvpDataSource.BACKEND)
-        } else {
-            when (val result = fetchOrganizerEvents()) {
-                is NetworkResult.Success -> {
-                    val mapped = result.data.map { it.toMvpEvent(context) }
-                    cachedEvents = mapped
-                    lastCacheTime = System.currentTimeMillis()
-                    OrganizerMvpLoad(mapped.manageable(), OrganizerMvpDataSource.BACKEND)
-                }
-                is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
-                NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
+        val load = loadOrganizerEvents()
+        return if (load.source == OrganizerMvpDataSource.ERROR) load
+        else OrganizerMvpLoad(load.data.manageable(), load.source, load.message)
+    }
+
+    /**
+     * GET organizer/events behind the shared 60 s snapshot: a screen opened within the window reuses the rows the
+     * previous one already downloaded. Failures are never cached.
+     */
+    private suspend fun loadOrganizerEvents(): OrganizerMvpLoad<List<OrganizerMvpEvent>> {
+        val userId = currentUserId()
+        eventsCache.get(userId)?.let { return OrganizerMvpLoad(it, OrganizerMvpDataSource.BACKEND) }
+        val generation = eventsCache.generation()
+        // The session the answer is fetched for, read before the request: a login or account switch
+        // that lands while it is in flight must not file the rows under the new user.
+        val owner = lastKnown.currentOwner()
+        return when (val result = fetchOrganizerEvents()) {
+            is NetworkResult.Success -> {
+                val mapped = result.data.map { it.toMvpEvent(context) }
+                eventsCache.put(userId, mapped, generation)
+                // The persisted copy the screens paint on a cold open. Only a success lands here.
+                lastKnown.write(OrganizerSnapshots.EVENTS, mapped, owner)
+                OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
             }
+            is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
+            NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
+        }
+    }
+
+    /** Drops the shared snapshot after an organizer mutation or a pull-to-refresh; the next read fetches. */
+    fun invalidateEvents() = eventsCache.clear()
+
+    /**
+     * A mutation that can change the event rows or their embedded counts must not leave either
+     * snapshot behind: the user's own edit is never masked by an answer taken before it.
+     */
+    private suspend fun <T> NetworkResult<T>.invalidateEventsAfterSuccess(): NetworkResult<T> = also {
+        if (it is NetworkResult.Success) {
+            invalidateEvents()
+            lastKnown.invalidate(OrganizerSnapshots.EVENTS)
         }
     }
 
@@ -108,17 +143,9 @@ open class OrganizerRepository(private val context: Context) {
         return selected
     }
 
-    suspend fun loadEventsForMvp(): OrganizerMvpLoad<List<OrganizerMvpEvent>> {
-        return when (val result = fetchOrganizerEvents()) {
-                    is NetworkResult.Success -> {
-                        val mapped = result.data.map { it.toMvpEvent(context) }
-                        cachedEvents = mapped
-                        lastCacheTime = System.currentTimeMillis()
-                        OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
-                    }
-            is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
-            NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
-        }
+    /** The whole organizer list, cache first. */
+    open suspend fun loadEventsForMvp(): OrganizerMvpLoad<List<OrganizerMvpEvent>> {
+        return loadOrganizerEvents()
     }
 
     suspend fun loadEventForMvp(eventId: String): OrganizerMvpLoad<OrganizerMvpEvent?> {
@@ -219,14 +246,14 @@ open class OrganizerRepository(private val context: Context) {
     }
 
     suspend fun enableScanPurposeForMvp(eventId: String, purposeId: String, enabled: Boolean) =
-        if (enabled) safeApiCall { apiService.enableOrganizerScanPurpose(eventId, purposeId) }
-        else safeApiCall { apiService.disableOrganizerScanPurpose(eventId, purposeId) }
+        (if (enabled) safeApiCall { apiService.enableOrganizerScanPurpose(eventId, purposeId) }
+        else safeApiCall { apiService.disableOrganizerScanPurpose(eventId, purposeId) }).invalidateEventsAfterSuccess()
 
     suspend fun updateScanPurposeTrackingOnlyForMvp(eventId: String, purposeId: String, trackingOnly: Boolean) =
-        safeApiCall { apiService.updateOrganizerScanPurposeTrackingOnly(eventId, purposeId, trackingOnly) }
+        safeApiCall { apiService.updateOrganizerScanPurposeTrackingOnly(eventId, purposeId, trackingOnly) }.invalidateEventsAfterSuccess()
 
     suspend fun deleteScanPurposeForMvp(eventId: String, purposeId: String) =
-        safeApiCall { apiService.deleteOrganizerScanPurpose(eventId, purposeId) }
+        safeApiCall { apiService.deleteOrganizerScanPurpose(eventId, purposeId) }.invalidateEventsAfterSuccess()
 
     suspend fun getEvents(): NetworkResult<List<EventResponse>> =
         when (val result = safeApiCall { apiService.getEvents() }) {
@@ -234,7 +261,7 @@ open class OrganizerRepository(private val context: Context) {
             is NetworkResult.Error -> result
             NetworkResult.Loading -> NetworkResult.Loading
         }
-    suspend fun fetchOrganizerEvents() = safeApiCall { apiService.getOrganizerEvents() }
+    open suspend fun fetchOrganizerEvents() = safeApiCall { apiService.getOrganizerEvents() }
     open suspend fun fetchOrganizerEvent(eventId: String) = safeApiCall { apiService.getOrganizerEvent(eventId) }
 
     /**
@@ -243,7 +270,7 @@ open class OrganizerRepository(private val context: Context) {
      */
     open suspend fun fetchEventDetail(eventId: String) = safeApiCall { apiService.getEventById(eventId) }
     open suspend fun updateOrganizerEvent(eventId: String, request: com.thedavelopers.eventqr.features.events.model.dto.EventRequest) =
-        safeApiCall { apiService.updateOrganizerEvent(eventId, request) }
+        safeApiCall { apiService.updateOrganizerEvent(eventId, request) }.invalidateEventsAfterSuccess()
     suspend fun uploadEventBanner(file: File): NetworkResult<com.thedavelopers.eventqr.features.uploads.model.dto.StoredFileResponse> = safeApiCall {
         val contentType = detectImageMediaType(file) ?: "image/jpeg"
         val requestBody = file.asRequestBody(contentType.toMediaTypeOrNull())
@@ -256,21 +283,24 @@ open class OrganizerRepository(private val context: Context) {
     suspend fun fetchOrganizerTransactions(eventId: String) = safeApiCall { apiService.getOrganizerTransactions(eventId) }
     suspend fun fetchOrganizerStaff(eventId: String) = safeApiCall { apiService.getOrganizerStaff(eventId) }
     suspend fun addOrganizerStaff(eventId: String, request: StaffAssignmentRequestDto) =
-        safeApiCall { apiService.addOrganizerStaff(eventId, request) }
+        safeApiCall { apiService.addOrganizerStaff(eventId, request) }.invalidateEventsAfterSuccess()
     suspend fun updateOrganizerStaff(eventId: String, assignmentId: String, request: StaffAssignmentUpdateRequestDto) =
-        safeApiCall { apiService.updateOrganizerStaff(eventId, assignmentId, request) }
+        safeApiCall { apiService.updateOrganizerStaff(eventId, assignmentId, request) }.invalidateEventsAfterSuccess()
     suspend fun removeOrganizerStaff(eventId: String, assignmentId: String) =
-        safeApiCall { apiService.removeOrganizerStaff(eventId, assignmentId) }
+        safeApiCall { apiService.removeOrganizerStaff(eventId, assignmentId) }.invalidateEventsAfterSuccess()
     suspend fun searchOrganizerUsers(query: String) = safeApiCall { apiService.searchOrganizerUsers(query) }
     suspend fun fetchOrganizerScanPurposes(eventId: String) = safeApiCall { apiService.getOrganizerScanPurposes(eventId) }
     suspend fun createOrganizerScanPurpose(eventId: String, request: OrganizerScanPurposeRequestDto) =
-        safeApiCall { apiService.createOrganizerScanPurpose(eventId, request) }
+        safeApiCall { apiService.createOrganizerScanPurpose(eventId, request) }.invalidateEventsAfterSuccess()
     suspend fun updateOrganizerScanPurpose(eventId: String, purposeId: String, request: OrganizerScanPurposeRequestDto) =
-        safeApiCall { apiService.updateOrganizerScanPurpose(eventId, purposeId, request) }
+        safeApiCall { apiService.updateOrganizerScanPurpose(eventId, purposeId, request) }.invalidateEventsAfterSuccess()
 
-    suspend fun createEvent(request: EventRequest) = safeApiCall { apiService.createEvent(request) }
-    suspend fun reviewEvent(eventId: String, request: EventApprovalRequest) = safeApiCall { apiService.reviewEvent(eventId, request) }
-    suspend fun activateEvent(eventId: String) = safeApiCall { apiService.activateEvent(eventId) }
+    suspend fun createEvent(request: EventRequest) =
+        safeApiCall { apiService.createEvent(request) }.invalidateEventsAfterSuccess()
+    suspend fun reviewEvent(eventId: String, request: EventApprovalRequest) =
+        safeApiCall { apiService.reviewEvent(eventId, request) }.invalidateEventsAfterSuccess()
+    suspend fun activateEvent(eventId: String) =
+        safeApiCall { apiService.activateEvent(eventId) }.invalidateEventsAfterSuccess()
 
 
     suspend fun getRegistrationsByEvent(eventId: String): NetworkResult<List<RegistrationResponse>> =
@@ -280,10 +310,12 @@ open class OrganizerRepository(private val context: Context) {
             NetworkResult.Loading -> NetworkResult.Loading
         }
 
-    suspend fun createScanPurpose(request: ScanPurposeRequest) = safeApiCall { apiService.createScanPurpose(request) }
+    suspend fun createScanPurpose(request: ScanPurposeRequest) =
+        safeApiCall { apiService.createScanPurpose(request) }.invalidateEventsAfterSuccess()
     suspend fun getScanPurposesByEvent(eventId: String) = safeApiCall { apiService.getScanPurposesByEvent(eventId) }
 
-    suspend fun saveReward(request: RewardRequest) = safeApiCall { apiService.saveReward(request) }
+    suspend fun saveReward(request: RewardRequest) =
+        safeApiCall { apiService.saveReward(request) }.invalidateEventsAfterSuccess()
     suspend fun getRewardsByEvent(eventId: String) = safeApiCall { apiService.getRewardsByEvent(eventId) }
     suspend fun getRewardRedemptions(eventId: String) = safeApiCall { apiService.getRewardRedemptions(eventId) }
 
@@ -294,9 +326,9 @@ open class OrganizerRepository(private val context: Context) {
     suspend fun saveTransactionRule(
         eventId: String,
         request: TransactionRuleRequest,
-    ) = safeApiCall { apiService.saveOrganizerTransactionRule(eventId, request) }
+    ) = safeApiCall { apiService.saveOrganizerTransactionRule(eventId, request) }.invalidateEventsAfterSuccess()
 
-    suspend fun getMyNotifications(
+    open suspend fun getMyNotifications(
         eventId: java.util.UUID? = null,
         notificationType: NotificationType? = null,
     ): NetworkResult<List<NotificationResponse>> = safeApiCall { apiService.getMyNotifications(eventId = eventId, notificationType = notificationType) }
@@ -329,8 +361,9 @@ open class OrganizerRepository(private val context: Context) {
     }
 
     companion object {
-    const val CACHE_TTL_MS = 300_000L // 5 minutes
-    private var lastCacheTime = 0L
+        /** The remembered organizer event selection; wiped with the session (see `EventQrApplication`). */
+        const val SELECTION_PREFS = "organizer_mvp_selection"
+
         private const val KEY_SELECTED_EVENT_ID = "selected_event_id"
     }
 }

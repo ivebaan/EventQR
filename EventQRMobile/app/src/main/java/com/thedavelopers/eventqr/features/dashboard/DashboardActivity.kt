@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
 import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.core.util.DateFormatters
@@ -35,7 +36,7 @@ import com.thedavelopers.eventqr.features.attendee.EXTRA_EVENT_STATUS
 import com.thedavelopers.eventqr.features.attendee.EXTRA_EVENT_TITLE
 import com.thedavelopers.eventqr.features.attendee.configureAttendeeBottomNav
 import com.thedavelopers.eventqr.features.attendee.configureAttendeeQuickActions
-import com.thedavelopers.eventqr.features.auth.AuthRepository
+import com.thedavelopers.eventqr.core.session.SessionRefresher
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardSummary
 import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardUpcomingEvent
 import com.thedavelopers.eventqr.features.events.EventStatusBadgeStyler
@@ -69,6 +70,9 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
     private var isSwipeRefreshing = false
     private var isFirstResume = true
     private var hasRenderedContent = false
+    // The last summary painted, plus the rewards cell the deferred fan-out replaces.
+    private var headSummary: DashboardSummary? = null
+    private var rewardsClaimed: Long? = null
 
     /** Every load goes through [reload], so a resume can prove it issues exactly one request. */
     @VisibleForTesting
@@ -94,6 +98,7 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
             AttendeeRepository(this),
             sessionManager,
             UiStrings(this),
+            cache = LastKnownCache.get(this),
         )
         presenter.attach(this)
 
@@ -109,12 +114,12 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         errorStrip = findViewById(R.id.errorDashboard)
         findViewById<View>(R.id.btnErrorStripRetry).setOnClickListener {
             errorStrip.visibility = View.GONE
-            reload()
+            reload(forceNetwork = true)
         }
 
         swipeRefreshLayout.setOnRefreshListener {
             isSwipeRefreshing = true
-            reload()
+            reload(forceNetwork = true)
         }
 
         bindPassHead()
@@ -134,9 +139,10 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         if (!isFirstResume) reload()
         isFirstResume = false
         // Re-issue the access token so a role change (e.g. upgraded to organizer after an
-        // event request approval) is reflected without requiring a logout/login.
+        // event request approval) is reflected without requiring a logout/login. The 10 min window
+        // keeps a resume from spending a refresh token: launch already refreshed this session.
         lifecycleScope.launch {
-            AuthRepository(this@DashboardActivity).refreshSessionToken()
+            SessionRefresher.refreshIfStale(this@DashboardActivity)
         }
     }
 
@@ -167,6 +173,11 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         errorStrip.visibility = View.GONE
         upcomingEventsLayout.visibility = View.VISIBLE
         discoverEventsLayout.visibility = View.VISIBLE
+
+        headSummary = summary
+        // The summary's own value is null on the deferred path, so a resume/refresh keeps the cell the
+        // last fan-out filled instead of blanking it back to "--" until the next answer lands.
+        rewardsClaimed = summary.rewardsClaimedCount ?: rewardsClaimed
 
         headName = (summary.fullName?.takeIf { it.isNotBlank() }
             ?: sessionManager.getFullName()?.takeIf { it.isNotBlank() }
@@ -221,6 +232,13 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
+    /** Only the rewards cell changes: the rest of the pass head keeps what it already shows. */
+    override fun showRewardsCount(count: Long) {
+        rewardsClaimed = count
+        if (!hasRenderedContent) return
+        headSummary?.let { bindPassHead(it) }
+    }
+
     override fun openSection(title: String, message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
@@ -241,7 +259,8 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         val portals = PortalSwitcher.portalsForRole(RoleMapper.normalizeRole(sessionManager.getUserRole()))
         val roleNames = portals.map { PortalSwitcher.shortRoleName(this, it) }
         val stats = DashboardStats.passHeadStats(
-            summary = summary,
+            // The deferred rewards answer wins over the summary's own (unknown) value.
+            summary = summary?.copy(rewardsClaimedCount = rewardsClaimed ?: summary.rewardsClaimedCount),
             upcomingLabel = getString(R.string.ui_attendee_stat_upcoming),
             attendedLabel = getString(R.string.ui_attendee_stat_attended),
             rewardsLabel = getString(R.string.ui_attendee_stat_rewards_claimed),
@@ -382,7 +401,7 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
                         getString(R.string.ui_attendee_dashboard_error_title),
                         getString(R.string.ui_attendee_load_error_body),
                     )
-                    setAction(getString(R.string.common_retry)) { reload() }
+                    setAction(getString(R.string.common_retry)) { reload(forceNetwork = true) }
                 },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -393,9 +412,9 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
     }
 
     /** Every load path counts here, so a resume cannot quietly issue a second request. */
-    private fun reload() {
+    private fun reload(forceNetwork: Boolean = false) {
         loadRequests++
-        presenter.loadDashboard()
+        presenter.loadDashboard(forceNetwork)
     }
 
     private fun metaFor(event: DashboardUpcomingEvent, time: String): String =

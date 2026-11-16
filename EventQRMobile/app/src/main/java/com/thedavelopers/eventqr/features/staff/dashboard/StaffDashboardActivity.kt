@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.core.util.PortalSwitcher
 import com.thedavelopers.eventqr.core.util.RoleMapper
@@ -38,6 +39,9 @@ import java.util.Locale
  * a card. Recent scans are hairline rows, never raised cards.
  */
 open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.View {
+    /** Tests set this before onCreate to point the snapshot reads at their own directory. */
+    internal var cacheOverride: LastKnownCache? = null
+
     private lateinit var presenter: StaffDashboardPresenter
     private lateinit var repository: StaffRepository
     private lateinit var adapter: TransactionLogAdapter
@@ -73,7 +77,12 @@ open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
 
         repository = StaffRepository(this)
-        presenter = StaffDashboardPresenter(this, repository, UiStrings(this))
+        presenter = StaffDashboardPresenter(
+            this,
+            repository,
+            UiStrings(this),
+            cache = cacheOverride ?: LastKnownCache.get(this),
+        )
         adapter = TransactionLogAdapter()
         passHead = findViewById(R.id.passHead)
         skeletonLoading = findViewById(R.id.skeletonLoading)
@@ -92,7 +101,8 @@ open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.
         swipeRefreshLayout = findViewById(R.id.swipeRefreshDashboard)
         swipeRefreshLayout.setOnRefreshListener {
             isSwipeRefreshing = true
-            presenter.loadData()
+            // A pull bypasses the persisted snapshots: the user asked for fresh numbers.
+            presenter.loadData(forceNetwork = true)
         }
 
         bindPassHead()

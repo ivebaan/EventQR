@@ -6,6 +6,11 @@ import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.ApiResponse
 import com.thedavelopers.eventqr.core.api.dto.PageResponse
 import com.thedavelopers.eventqr.core.api.safeApiCall
+import com.thedavelopers.eventqr.core.cache.AttendeeSnapshots
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.session.CurrentUserCache
+import com.thedavelopers.eventqr.core.session.SessionManager
+import com.thedavelopers.eventqr.core.session.cachedCurrentUser
 import com.thedavelopers.eventqr.features.events.model.dto.AttendeeEventResponse
 import com.thedavelopers.eventqr.features.events.model.dto.EventAvailabilityResponse
 import com.thedavelopers.eventqr.features.events.model.dto.EventCreationRequestDto
@@ -29,7 +34,14 @@ import java.util.UUID
 open class AttendeeRepository(context: Context) {
     private val appContext = context.applicationContext ?: context
     private val apiService = ApiClient.getService(context)
-    suspend fun getEvents(): NetworkResult<List<AttendeeEventResponse>> =
+    // Only the registrations/current-user cache paths need the session; built on first use.
+    private val sessionManager by lazy { SessionManager(appContext) }
+    // The persisted last-known layer: written by the full-answer reads, dropped by the mutations.
+    private val lastKnown by lazy { LastKnownCache.get(appContext) }
+
+    /** The signed-in user the registration cache is scoped to (null when signed out). */
+    fun currentUserId(): String? = sessionManager.getUserId()
+    open suspend fun getEvents(): NetworkResult<List<AttendeeEventResponse>> =
         when (val result = safeApiCall { apiService.getAttendeeVisibleEvents() }) {
             is NetworkResult.Success -> NetworkResult.Success(result.data.content)
             is NetworkResult.Error -> result
@@ -37,15 +49,21 @@ open class AttendeeRepository(context: Context) {
         }
     open suspend fun getBrowseEvents(): NetworkResult<List<AttendeeEventResponse>> =
         loadAllPages(MAX_PAGES, sortKey = { it.eventStartAt }) { page -> apiService.getAttendeeBrowseEvents(page = page, size = PAGE_SIZE) }
-    suspend fun getEvent(eventId: String) = safeApiCall { apiService.getEventById(eventId) }
+    open suspend fun getEvent(eventId: String) = safeApiCall { apiService.getEventById(eventId) }
     open suspend fun getEventAvailability(eventId: String): NetworkResult<EventAvailabilityResponse> =
         safeApiCall { apiService.getEventAvailability(eventId) }
     suspend fun getOrganizerEvents(): NetworkResult<List<OrganizerEventDto>> = safeApiCall { apiService.getOrganizerEvents() }
     open suspend fun createEventRequest(request: EventCreationRequestDto) = safeApiCall { apiService.createEventRequest(request) }
     open suspend fun getMyEventRequests() = safeApiCall { apiService.getMyEventRequests() }
     suspend fun getEventRequest(requestId: String) = safeApiCall { apiService.getEventRequest(requestId) }
-    suspend fun getMyProfile() = safeApiCall { apiService.getUsersMe() }
-    suspend fun updateProfile(fullName: String, phoneNumber: String?) = safeApiCall {
+    suspend fun getMyProfile() = cachedCurrentUser(sessionManager.getUserId()) { fetchMyProfile() }
+    internal open suspend fun fetchMyProfile() = safeApiCall { apiService.getUsersMe() }
+    suspend fun updateProfile(fullName: String, phoneNumber: String?) =
+        saveProfile(fullName, phoneNumber).also { result ->
+            // The stored users/me copy is now the pre-edit one.
+            if (result is NetworkResult.Success) CurrentUserCache.invalidate()
+        }
+    internal open suspend fun saveProfile(fullName: String, phoneNumber: String?) = safeApiCall {
         apiService.updateUsersMe(com.thedavelopers.eventqr.features.users.model.dto.ProfileUpdateRequest(fullName, phoneNumber))
     }
     open suspend fun uploadEventPoster(file: File): NetworkResult<StoredFileResponse> = safeApiCall {
@@ -56,16 +74,25 @@ open class AttendeeRepository(context: Context) {
         apiService.uploadEventLogo(part)
     }
     suspend fun getStoredFile(fileId: String) = safeApiCall { apiService.getStoredFile(fileId) }
-    open suspend fun createRegistration(request: RegistrationRequest) = safeApiCall { apiService.createRegistration(request) }
-    open suspend fun getMyRegistrations(): NetworkResult<List<RegistrationResponse>> =
-        when (val result = loadAllPages(MAX_PAGES, sortKey = { it.eventStartAt }) { page -> apiService.getMyRegistrations(page = page, size = PAGE_SIZE) }) {
-            is NetworkResult.Success -> result.also {
-                RegistrationsCache.set(it.data)
-                QrPassCache.clearCancelled(appContext, it.data)
-            }
-            is NetworkResult.Error -> result
-            NetworkResult.Loading -> NetworkResult.Loading
+    open suspend fun createRegistration(request: RegistrationRequest) =
+        safeApiCall { apiService.createRegistration(request) }.also { result ->
+            // The attendee's own registration must not be masked by a snapshot taken before it.
+            if (result is NetworkResult.Success) invalidateRegistrationSnapshots()
         }
+    open suspend fun getMyRegistrations(): NetworkResult<List<RegistrationResponse>> {
+        // Captured before the pages are walked: an account switch mid-walk must not file this answer
+        // under the account that happens to be signed in when it lands.
+        val owner = lastKnown.currentOwner()
+        return loadAllPages(MAX_PAGES, sortKey = { it.eventStartAt }) { page ->
+            apiService.getMyRegistrations(page = page, size = PAGE_SIZE)
+        }.also { result ->
+            if (result is NetworkResult.Success) {
+                lastKnown.write(AttendeeSnapshots.REGISTRATIONS, result.data, owner)
+                RegistrationsCache.set(result.data, sessionManager.getUserId())
+                QrPassCache.clearCancelled(appContext, result.data)
+            }
+        }
+    }
     open suspend fun getMyEventTransactions(eventId: String) = safeApiCall { apiService.getMyEventTransactions(eventId) }
     open suspend fun getMyPointTransactions(eventId: String) = safeApiCall { apiService.getMyPointTransactions(eventId) }
     open suspend fun getMyTransactions() = safeApiCall { apiService.getMyTransactions() }
@@ -74,7 +101,12 @@ open class AttendeeRepository(context: Context) {
     suspend fun getQrCredentialById(qrCredentialId: String) = safeApiCall { apiService.getQrCredentialById(qrCredentialId) }
     open suspend fun cancelRegistration(registrationId: String): NetworkResult<RegistrationResponse> =
         safeApiCall { apiService.cancelRegistration(registrationId) }.also { result ->
-            if (result is NetworkResult.Success) QrPassCache.clear(appContext, registrationId)
+            if (result is NetworkResult.Success) {
+                QrPassCache.clear(appContext, registrationId)
+                // The cancel is the attendee's own change: every persisted list that embeds the
+                // registration is stale from here on, so the next open must fetch.
+                invalidateRegistrationSnapshots()
+            }
         }
     suspend fun getRegistration(registrationId: String) = safeApiCall { apiService.getRegistration(registrationId) }
     suspend fun getRegistrationsByEvent(eventId: String): NetworkResult<List<RegistrationResponse>> =
@@ -95,12 +127,33 @@ open class AttendeeRepository(context: Context) {
     open suspend fun getRewardsByEvent(eventId: String, includeUnavailable: Boolean = false) =
         safeApiCall { apiService.getAttendeeRewards(eventId, includeUnavailable) }
     suspend fun getRewardBalance(eventId: String, attendeeUserId: String) = safeApiCall { apiService.getRewardBalance(eventId, attendeeUserId) }
-    suspend fun redeemReward(request: RewardRedemptionRequest) = safeApiCall { apiService.redeemReward(request) }
+    suspend fun redeemReward(request: RewardRedemptionRequest) =
+        safeApiCall { apiService.redeemReward(request) }.also { result ->
+            if (result is NetworkResult.Success) invalidateRewardSnapshots()
+        }
     suspend fun getRewardRedemptions(eventId: String) = safeApiCall { apiService.getRewardRedemptions(eventId) }
     open suspend fun getMyRewardRedemptions(eventId: String) = safeApiCall { apiService.getMyClaimedRewards(eventId) }
     suspend fun getDashboardSummary() = safeApiCall { apiService.getDashboard() }
     suspend fun parseUuid(value: String?): UUID? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         runCatching { UUID.fromString(value.orEmpty()) }.getOrNull()
+    }
+
+    /**
+     * A register or a cancel makes every persisted list that embeds the registration stale: My
+     * passes, Discover's registration chip, and the dashboard's pass-head counts and upcoming rows.
+     */
+    internal suspend fun invalidateRegistrationSnapshots() {
+        lastKnown.invalidate(AttendeeSnapshots.REGISTRATIONS)
+        lastKnown.invalidate(AttendeeSnapshots.BROWSE_EVENTS)
+        lastKnown.invalidate(AttendeeSnapshots.DASHBOARD_SUMMARY)
+        lastKnown.invalidate(AttendeeSnapshots.DASHBOARD_UPCOMING)
+    }
+
+    /** A redemption moves the claimed-rewards cell and adds a ledger row, so both snapshots go. */
+    internal suspend fun invalidateRewardSnapshots() {
+        lastKnown.invalidate(AttendeeSnapshots.DASHBOARD_SUMMARY)
+        lastKnown.invalidate(AttendeeSnapshots.DASHBOARD_UPCOMING)
+        lastKnown.invalidate(CachedTransactionRow.KEY)
     }
 
     private fun detectImageMediaType(file: File): String? {

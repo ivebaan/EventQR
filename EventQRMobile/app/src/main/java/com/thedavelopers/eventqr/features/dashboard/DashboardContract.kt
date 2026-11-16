@@ -6,6 +6,11 @@ interface DashboardContract {
     interface View {
         fun showLoading(isLoading: Boolean)
         fun showSummary(summary: DashboardSummary)
+        /**
+         * The deferred "rewards claimed" answer: it lands after the rest of the screen painted, so only
+         * that one pass-head cell changes. Never called when the fan-out failed (the cell keeps `--`).
+         */
+        fun showRewardsCount(count: Long)
         fun showError(message: String)
         fun showMessage(message: String)
         /**

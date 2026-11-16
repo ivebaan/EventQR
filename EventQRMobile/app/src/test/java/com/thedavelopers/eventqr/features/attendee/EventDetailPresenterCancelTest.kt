@@ -46,7 +46,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun cancel_success_updatesCacheAndView() {
         val reg = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(reg))
+        RegistrationsCache.set(listOf(reg), "")
         val cancelled = reg.copy(status = RegistrationStatus.CANCELLED)
         val repo = FakeRepo(NetworkResult.Success(cancelled, "Registration cancelled"))
         val view = RecordingView()
@@ -60,14 +60,14 @@ class EventDetailPresenterCancelTest {
         assertEquals(listOf(false), view.registered)
         assertEquals(1, view.cancelledMessages.size)
         assertTrue(view.messages.isEmpty())
-        assertEquals(RegistrationStatus.CANCELLED, RegistrationsCache.get()!!.single().status)
+        assertEquals(RegistrationStatus.CANCELLED, RegistrationsCache.get("")!!.single().status)
     }
 
     @Test
     fun cancel_conflict_showsServerMessageAndKeepsRegistration() {
         val msg = "You can't cancel after check-in"
         val reg = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(reg))
+        RegistrationsCache.set(listOf(reg), "")
         val repo = FakeRepo(NetworkResult.Error("Conflict", serverMessage = msg))
         val view = RecordingView()
 
@@ -80,7 +80,7 @@ class EventDetailPresenterCancelTest {
         assertTrue(view.cancelledMessages.isEmpty())
         assertTrue(view.cancellable.isEmpty())
         // Unconfirmed outcome: the cache is invalidated so the next read refetches the truth.
-        assertNull(RegistrationsCache.get())
+        assertNull(RegistrationsCache.get(""))
     }
 
     @Test
@@ -111,21 +111,21 @@ class EventDetailPresenterCancelTest {
     @Test
     fun cachedRegistration_exposesCancelOnlyWhenStatusIsRegistered() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val view = RecordingView(userId = "u1")
         presenter(view, FakeRepo()).refreshRegistrationStatus(eventId.toString())
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(registered.registrationId.toString(), view.cancellable.last())
 
         for (status in listOf(RegistrationStatus.ENTERED, RegistrationStatus.EXITED, RegistrationStatus.CANCELLED, RegistrationStatus.NO_SHOW)) {
-            RegistrationsCache.set(listOf(registration(status)))
+            RegistrationsCache.set(listOf(registration(status)), "u1")
             val v = RecordingView(userId = "u1")
             presenter(v, FakeRepo()).refreshRegistrationStatus(eventId.toString())
             shadowOf(Looper.getMainLooper()).idle()
             assertNull("status $status", v.cancellable.last())
         }
         // CANCELLED is not shown as an active registration.
-        RegistrationsCache.set(listOf(registration(RegistrationStatus.CANCELLED)))
+        RegistrationsCache.set(listOf(registration(RegistrationStatus.CANCELLED)), "u1")
         val v = RecordingView(userId = "u1")
         presenter(v, FakeRepo()).refreshRegistrationStatus(eventId.toString())
         assertFalse(v.registered.first())
@@ -134,7 +134,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun recordedPointActivity_hidesCancel() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val repo = FakeRepo().apply {
             pointTransactions = NetworkResult.Success(listOf(pointTransaction()))
         }
@@ -150,7 +150,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun failedPointRead_failsClosedAndHidesCancel() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val repo = FakeRepo().apply {
             pointTransactions = NetworkResult.Error("offline")
         }
@@ -166,7 +166,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun failedScanRead_failsClosedAndHidesCancel() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val repo = FakeRepo().apply {
             scans = NetworkResult.Error("offline")
         }
@@ -233,7 +233,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun approvedScan_hidesCancel_butRejectedScanDoesNot() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val repo = FakeRepo().apply {
             scans = NetworkResult.Success(listOf(scan(registered.registrationId.toString(), TransactionResult.APPROVED)))
         }
@@ -256,7 +256,7 @@ class EventDetailPresenterCancelTest {
         // though the backend refuses to cancel them (§6.2).
         for (status in listOf(RegistrationStatus.ENTERED, RegistrationStatus.EXITED)) {
             val reg = registration(status)
-            RegistrationsCache.set(listOf(reg))
+            RegistrationsCache.set(listOf(reg), "u1")
             val view = RecordingView(userId = "u1")
             presenter(view, FakeRepo()).refreshRegistrationStatus(eventId.toString())
             shadowOf(Looper.getMainLooper()).idle()
@@ -268,7 +268,7 @@ class EventDetailPresenterCancelTest {
     @Test
     fun pointsBlockingCancelKeepThePassId() {
         val registered = registration(RegistrationStatus.REGISTERED)
-        RegistrationsCache.set(listOf(registered))
+        RegistrationsCache.set(listOf(registered), "u1")
         val repo = FakeRepo().apply { pointTransactions = NetworkResult.Success(listOf(pointTransaction())) }
         val view = RecordingView(userId = "u1")
 

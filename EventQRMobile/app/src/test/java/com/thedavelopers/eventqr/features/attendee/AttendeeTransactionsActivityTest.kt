@@ -11,10 +11,12 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
+import com.thedavelopers.eventqr.core.api.dto.RegistrationStatus
 import com.thedavelopers.eventqr.core.api.dto.TransactionResult
 import com.thedavelopers.eventqr.core.api.dto.TransactionType
 import com.thedavelopers.eventqr.features.ShadowEncryptedSharedPreferences
 import com.thedavelopers.eventqr.features.ShadowMasterKeys
+import com.thedavelopers.eventqr.features.registrations.RegistrationsCache
 import com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationResponse
 import com.thedavelopers.eventqr.features.rewards.model.dto.PointTransactionResponse
 import com.thedavelopers.eventqr.features.transactions.model.dto.TransactionResponse
@@ -24,6 +26,7 @@ import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -44,6 +47,12 @@ class AttendeeTransactionsActivityTest {
     private val eventA: UUID = UUID.randomUUID()
     private val eventB: UUID = UUID.randomUUID()
 
+    @Before
+    fun setUp() {
+        // Another test's cached answer must not decide this class's retry/request assertions.
+        RegistrationsCache.clear()
+    }
+
     private fun transaction(
         eventId: UUID = UUID.randomUUID(),
         eventTitle: String? = "DevFest Manila",
@@ -61,13 +70,41 @@ class AttendeeTransactionsActivityTest {
         scannedAt = Instant.now(),
     )
 
+    /** A manual ledger row: the only trace an event's history has when no scan happened there. */
+    private fun pointTransaction(eventId: UUID) = PointTransactionResponse(
+        eventId = eventId,
+        attendeeUserId = UUID.randomUUID(),
+        sourceTransactionId = UUID.randomUUID(),
+        pointsChanged = 25,
+        occurredAt = Instant.now(),
+    )
+
+    private fun registration(eventId: UUID, title: String) = RegistrationResponse(
+        registrationId = UUID.randomUUID(),
+        eventId = eventId,
+        attendeeUserId = UUID.randomUUID(),
+        attendeeEmail = "a@test.com",
+        attendeeName = "A",
+        status = RegistrationStatus.REGISTERED,
+        eventTitle = title,
+    )
+
     private class FakeRepo(context: Context) : AttendeeRepository(context) {
         var transactions: NetworkResult<List<TransactionResponse>> = NetworkResult.Success(emptyList())
+        var registrations: NetworkResult<List<RegistrationResponse>> = NetworkResult.Success(emptyList())
+        var registrationReads = 0
+        val points = mutableMapOf<String, NetworkResult<List<PointTransactionResponse>>>()
+        /** Holds every ledger read open, so a test decides when the enrichment repaint lands. */
+        var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
         override suspend fun getMyTransactions() = transactions
-        override suspend fun getMyRegistrations(): NetworkResult<List<RegistrationResponse>> =
-            NetworkResult.Success(emptyList())
-        override suspend fun getMyPointTransactions(eventId: String): NetworkResult<List<PointTransactionResponse>> =
-            NetworkResult.Success(emptyList())
+        override suspend fun getMyRegistrations(): NetworkResult<List<RegistrationResponse>> {
+            registrationReads++
+            return registrations
+        }
+        override suspend fun getMyPointTransactions(eventId: String): NetworkResult<List<PointTransactionResponse>> {
+            gate?.await()
+            return points[eventId] ?: NetworkResult.Success(emptyList())
+        }
     }
 
     private fun build(repo: FakeRepo, requestedEventId: String? = null): AttendeeTransactionsActivity {
@@ -345,6 +382,80 @@ class AttendeeTransactionsActivityTest {
     }
 
     @Test
+    fun theRequestedEventIsPreselectedEvenWhenOnlyItsLedgerRowArrivesLate() {
+        val repo = FakeRepo(ApplicationProvider.getApplicationContext()).apply {
+            // eventB is registered with no scan, so its only row is the per-event ledger row that a
+            // deferred read brings: the first paint cannot offer it yet.
+            registrations = NetworkResult.Success(listOf(registration(eventB, "Night Market")))
+            transactions = NetworkResult.Success(listOf(transaction(eventA, "Day Fair")))
+            points[eventB.toString()] = NetworkResult.Success(listOf(pointTransaction(eventB)))
+        }
+        val activity = build(repo, requestedEventId = eventB.toString())
+
+        // Same visible outcome as one all-at-once render: eventB chosen, its one row shown.
+        assertEquals("Night Market", input(activity).hint.toString())
+        assertEquals(1, activity.recycler().adapter!!.itemCount)
+    }
+
+    @Test
+    fun ledgerOnlyHistory_keepsTheSkeletonInsteadOfFlashingTheEmptyState() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repo = FakeRepo(ApplicationProvider.getApplicationContext()).apply {
+            // Registered, never scanned: the only row is the ledger row the fan-out still owes.
+            registrations = NetworkResult.Success(listOf(registration(eventB, "Night Market")))
+            transactions = NetworkResult.Success(emptyList())
+            points[eventB.toString()] = NetworkResult.Success(listOf(pointTransaction(eventB)))
+            this.gate = gate
+        }
+        val activity = build(repo)
+
+        // First-load state: no empty list and no count printed over rows that are still coming.
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.skeletonLoading).visibility)
+        assertEquals(View.GONE, activity.empty().visibility)
+        assertEquals(View.GONE, activity.recycler().visibility)
+
+        gate.complete(Unit)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.skeletonLoading).visibility)
+        assertEquals(1, activity.recycler().adapter!!.itemCount)
+        assertEquals(View.VISIBLE, activity.recycler().visibility)
+        assertEquals(View.GONE, activity.empty().visibility)
+        assertEquals(
+            "1 transaction",
+            activity.findViewById<TextView>(R.id.txtHistoryTransactionCount).text.toString(),
+        )
+    }
+
+    @Test
+    fun anEnrichmentRepaintLeavesTheFilterTheAttendeeIsUsingAlone() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repo = twoEventRepository().apply { this.gate = gate }
+        val activity = build(repo)
+        val field = input(activity)
+        assertEquals(3, activity.recycler().adapter!!.itemCount)
+
+        // The attendee is mid-filter while the ledger read is still in flight.
+        field.setText("night")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, shownCount(activity))
+
+        // The fan-out lands on the same set of events: the rows and the count update, the live
+        // filter (and the list under it) is left untouched.
+        repo.points[eventA.toString()] = NetworkResult.Success(listOf(pointTransaction(eventA)))
+        gate.complete(Unit)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("night", field.text.toString())
+        assertEquals(1, shownCount(activity))
+        assertEquals(4, activity.recycler().adapter!!.itemCount)
+        assertEquals(
+            "4 transactions",
+            activity.findViewById<TextView>(R.id.txtHistoryTransactionCount).text.toString(),
+        )
+    }
+
+    @Test
     fun zeroTransactions_keepsThePickerUsableOnAllEvents() {
         val repo = FakeRepo(ApplicationProvider.getApplicationContext())
         val activity = build(repo)
@@ -355,6 +466,21 @@ class AttendeeTransactionsActivityTest {
         assertEquals(activity.getString(R.string.user_transaction_history_all_events), input(activity).hint.toString())
         assertTrue(input(activity).isEnabled)
         assertEquals(View.VISIBLE, activity.empty().visibility)
+    }
+
+    @Test
+    fun theRetryButtonForcesTheRegistrationsRead() {
+        val repo = FakeRepo(ApplicationProvider.getApplicationContext()).apply {
+            transactions = NetworkResult.Success(listOf(transaction()))
+        }
+        val activity = build(repo)
+        assertEquals(1, repo.registrationReads)
+
+        activity.findViewById<View>(R.id.btnTransactionsRetry).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("an explicit retry asks the network for both legs", 2, repo.registrationReads)
+        assertEquals(1, activity.recycler().adapter!!.itemCount)
     }
 
     @Test

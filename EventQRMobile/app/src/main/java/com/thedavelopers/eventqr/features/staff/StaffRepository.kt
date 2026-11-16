@@ -8,6 +8,9 @@ import com.thedavelopers.eventqr.core.api.dto.ScanPurposeCode
 import com.thedavelopers.eventqr.core.api.dto.PageResponse
 import com.thedavelopers.eventqr.core.api.dto.RegistrationStatus
 import com.thedavelopers.eventqr.core.api.safeApiCall
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
+import com.thedavelopers.eventqr.core.cache.StaffSnapshots
 import com.thedavelopers.eventqr.features.attendee.loadAllPages
 import com.thedavelopers.eventqr.features.staff.model.dto.StaffTodaySummary
 import com.thedavelopers.eventqr.features.staff.model.dto.StaffTransactionSummary
@@ -40,20 +43,49 @@ open class StaffRepository internal constructor(
     private val apiService: ApiService,
     private val printConfirmRetryDelaysMs: List<Long> = PRINT_CONFIRM_RETRY_DELAYS_MS,
     private val assignedEventsCache: AssignedEventsCache = AssignedEventsCache.shared,
+    private val lastKnownCache: LastKnownCache? = null,
 ) {
-    constructor(context: Context) : this(ApiClient.getService(context))
+    constructor(context: Context) : this(
+        ApiClient.getService(context),
+        lastKnownCache = LastKnownCache.get(context.applicationContext ?: context),
+    )
 
-    /** The assigned events, served from a ~60 s in-memory cache; call [invalidateEvents] to force a refetch. */
+    /**
+     * The assigned events, served from a ~60 s in-memory cache; call [invalidateEvents] to force a refetch.
+     * A successful answer is also persisted, so a cold open can paint the list before the network replies.
+     */
     open suspend fun getEvents(): NetworkResult<List<StaffAssignedEventResponse>> {
         assignedEventsCache.get()?.let { return NetworkResult.Success(it) }
         val generation = assignedEventsCache.generation()
+        // Read before the request: an answer that lands after an account switch stays filed under the
+        // session it was fetched for.
+        val owner = lastKnownCache?.currentOwner().orEmpty()
         val result = safeApiCall { apiService.getStaffEvents() }
-        if (result is NetworkResult.Success) assignedEventsCache.put(result.data, generation)
+        if (result is NetworkResult.Success) {
+            assignedEventsCache.put(result.data, generation)
+            lastKnownCache?.write(StaffSnapshots.ASSIGNMENTS, result.data, owner)
+        }
         return result
     }
 
-    /** Drops the cached assigned events (pull-to-refresh). */
+    /**
+     * Drops the in-memory assigned events (pull-to-refresh); the next read fetches. The persisted copy is
+     * kept: a pull bypasses the snapshot and rewrites it on success, so a failed pull still leaves the
+     * next cold open something to paint.
+     */
     open fun invalidateEvents() = assignedEventsCache.clear()
+
+    /**
+     * A scan or a redemption moves today's numbers, and the counts the organizer screens embed, so those
+     * snapshots must not survive the change. Called after the server accepted it, never before.
+     */
+    private suspend fun <T> NetworkResult<T>.invalidateTodayAfterSuccess(): NetworkResult<T> = also {
+        if (it is NetworkResult.Success) {
+            lastKnownCache?.invalidate(StaffSnapshots.TODAY_SUMMARY)
+            lastKnownCache?.invalidate(StaffSnapshots.TODAY_TRANSACTIONS)
+            lastKnownCache?.invalidate(OrganizerSnapshots.EVENTS)
+        }
+    }
 
     /**
      * The caller's `canPrintId` for [eventId], read off the assigned-event list — the same source the
@@ -77,7 +109,7 @@ open class StaffRepository internal constructor(
 
     open suspend fun verifyScan(request: TransactionRequest): NetworkResult<ScanVerificationResponse> = safeApiCall {
         apiService.verifyScan(request.eventId.toString(), request)
-    }
+    }.invalidateTodayAfterSuccess()
 
     open suspend fun createTransaction(request: TransactionRequest, purposeCode: ScanPurposeCode) = safeApiCall {
         when (purposeCode) {
@@ -89,7 +121,7 @@ open class StaffRepository internal constructor(
             ScanPurposeCode.EXIT -> apiService.logExit(request.eventId.toString(), request)
             else -> apiService.createTransaction(request)
         }
-    }
+    }.invalidateTodayAfterSuccess()
 
     /** Paged event transactions, optionally limited to one attendee. Read `totalElements` for counts. */
     open suspend fun getTransactionsByEvent(
@@ -136,11 +168,11 @@ open class StaffRepository internal constructor(
 
     open suspend fun rewardRedemptionScan(request: RewardRedemptionScanRequest) = safeApiCall {
         apiService.rewardRedemptionScan(request)
-    }
+    }.invalidateTodayAfterSuccess()
 
     suspend fun redeemRewardStaff(request: RewardRedemptionGrantRequest) = safeApiCall {
         apiService.redeemRewardStaff(request)
-    }
+    }.invalidateTodayAfterSuccess()
 
     suspend fun getLatestScan(eventId: String) = safeApiCall { apiService.getLatestScan(eventId) }
 

@@ -3,7 +3,6 @@ package com.thedavelopers.eventqr.core.session
 import android.content.Context
 import com.thedavelopers.eventqr.core.api.ApiClient
 import com.thedavelopers.eventqr.features.auth.model.dto.LogoutRequest
-import com.thedavelopers.eventqr.features.registrations.RegistrationsCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -30,7 +29,7 @@ object SessionLogout {
                 }
             }
         }
-        RegistrationsCache.clear()
+        // clearSession drops every registered session-scoped cache, including RegistrationsCache.
         sessionManager.clearSession()
     }
 }

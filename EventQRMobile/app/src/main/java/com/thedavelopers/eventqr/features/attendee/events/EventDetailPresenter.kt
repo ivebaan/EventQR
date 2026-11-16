@@ -29,6 +29,13 @@ class EventDetailPresenter(
     private var cancelling = false
     /** The registration id whose activity check passed; null while unverified. */
     private var verifiedCancellableId: String? = null
+    /**
+     * True while a full load has not painted its event yet. The activity check is two extra network
+     * reads for a secondary action, so it waits for that paint instead of competing with it. The
+     * resume path always starts with a painted page, so it never sets this.
+     */
+    private var firstPaintPending = false
+    private var pendingActivityCheck: (() -> Unit)? = null
 
     fun detach() {
         job?.cancel()
@@ -39,6 +46,11 @@ class EventDetailPresenter(
 
     fun loadEventDetails(eventId: String) {
         view?.showLoading(true)
+        // A load that supersedes another owns the first paint: cancel the older one and drop the
+        // check it had queued, so that check cannot jump in front of this load's paint.
+        job?.cancel()
+        pendingActivityCheck = null
+        firstPaintPending = true
         job = scope.launch {
             checkRegistrationStatus(eventId)
             val result = repository.getEvent(eventId)
@@ -51,6 +63,12 @@ class EventDetailPresenter(
                     view?.showLoadError(result.message)
                 }
                 else -> Unit
+            }
+            // Painted (or unreachable): the deferred activity check is no longer behind anything.
+            firstPaintPending = false
+            pendingActivityCheck?.let { check ->
+                pendingActivityCheck = null
+                check()
             }
         }
     }
@@ -67,12 +85,12 @@ class EventDetailPresenter(
             return
         }
 
-        val cached = RegistrationsCache.get()
+        val cached = RegistrationsCache.get(userId)
         if (cached != null) {
             view?.updateRegistrationStatus(isRegisteredIn(cached, eventId))
             applyCancellableRegistration(cached, eventId)
         }
-        if (cached != null && RegistrationsCache.isFresh()) {
+        if (cached != null && RegistrationsCache.isFresh(userId)) {
             return
         }
 
@@ -122,15 +140,20 @@ class EventDetailPresenter(
             view?.setCancellableRegistration(registrationId)
             return
         }
-        activityJob = scope.launch {
-            val pointTransactions = repository.getMyPointTransactions(eventId)
-            val scans = repository.getMyEventTransactions(eventId)
-            val eligible = pointTransactions is NetworkResult.Success &&
-                scans is NetworkResult.Success &&
-                !hasRecordedActivity(registrationId, pointTransactions.data, scans.data)
-            verifiedCancellableId = if (eligible) registrationId else null
-            view?.setCancellableRegistration(verifiedCancellableId)
+        val verifyActivity: () -> Unit = {
+            activityJob = scope.launch {
+                val pointTransactions = repository.getMyPointTransactions(eventId)
+                val scans = repository.getMyEventTransactions(eventId)
+                val eligible = pointTransactions is NetworkResult.Success &&
+                    scans is NetworkResult.Success &&
+                    !hasRecordedActivity(registrationId, pointTransactions.data, scans.data)
+                verifiedCancellableId = if (eligible) registrationId else null
+                view?.setCancellableRegistration(verifiedCancellableId)
+            }
         }
+        // These are the event's two activity ledgers: they settle a secondary action, so a full load
+        // runs them once its event is on screen. A resume has a painted page and starts them at once.
+        if (firstPaintPending) pendingActivityCheck = verifyActivity else verifyActivity()
     }
 
     private fun isRegisteredIn(items: List<RegistrationResponse>, eventId: String): Boolean {

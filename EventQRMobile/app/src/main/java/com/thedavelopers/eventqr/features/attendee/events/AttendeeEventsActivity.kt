@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.core.util.DateFormatters
 import com.thedavelopers.eventqr.features.events.model.dto.AttendeeEventResponse
 import com.thedavelopers.eventqr.ui.components.CountLabel
@@ -87,7 +88,7 @@ open class AttendeeEventsActivity : AppCompatActivity(), EventsContract.View {
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
         configureAttendeeBottomNav(AttendeeBottomNavItem.EVENTS)
 
-        presenter = EventsPresenter(this, AttendeeRepository(this))
+        presenter = EventsPresenter(this, AttendeeRepository(this), LastKnownCache.get(this))
         swipeRefresh = findViewById(R.id.swipeRefreshEvents)
         recyclerView = findViewById(R.id.recyclerEvents)
         emptyState = findViewById(R.id.txtEventsEmpty)
@@ -113,7 +114,7 @@ open class AttendeeEventsActivity : AppCompatActivity(), EventsContract.View {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
-        swipeRefresh.setOnRefreshListener { presenter.loadEvents() }
+        swipeRefresh.setOnRefreshListener { presenter.loadEvents(forceNetwork = true) }
         chipAll.setOnClickListener { selectFilter(EventFilter.ALL) }
         chipThisWeek.setOnClickListener { selectFilter(EventFilter.THIS_WEEK) }
         chipRegistered.setOnClickListener { selectFilter(EventFilter.REGISTERED) }

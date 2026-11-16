@@ -80,7 +80,12 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
                 showBack = true,
                 topRightLabel = getString(R.string.manage_scan_purposes_add_action),
                 onTopRight = { showAddEditDialog() },
-                onRefresh = { loadPurposes(showInitialLoading = false) }
+                onRefresh = {
+                    // Pull-to-refresh bypasses the shared snapshot: the user asked for fresh rows.
+                    repository.invalidateEvents()
+                    loadPurposes(showInitialLoading = false)
+                }
+
             )
             swipeRefresh = shell.swipeRefreshLayout
             // One inline status line above the list: every failure lands here, never in a Toast.

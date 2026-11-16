@@ -10,13 +10,19 @@ import android.os.Looper
 import android.widget.Toast
 import androidx.core.view.WindowCompat
 import com.thedavelopers.eventqr.core.navigation.AppNavigator
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.session.CurrentUserCache
 import com.thedavelopers.eventqr.core.session.SessionEvents
 import com.thedavelopers.eventqr.core.session.SessionManager
+import com.thedavelopers.eventqr.core.session.SessionScopedCaches
 import com.thedavelopers.eventqr.core.util.padUCropForSystemBars
 import com.thedavelopers.eventqr.features.dashboard.DashboardRouter
 import com.thedavelopers.eventqr.features.dashboard.RoleReroutePolicy
 import com.thedavelopers.eventqr.features.notifications.EventDecisionNotifier
+import com.thedavelopers.eventqr.features.organizer.OrganizerEventsCache
+import com.thedavelopers.eventqr.features.organizer.OrganizerRepository
 import com.thedavelopers.eventqr.features.registrations.RegistrationsCache
+import com.thedavelopers.eventqr.features.staff.AssignedEventsCache
 import com.thedavelopers.eventqr.features.auth.login.LoginActivity
 import com.thedavelopers.eventqr.features.auth.register.RegistrationActivity
 import com.thedavelopers.eventqr.ui.theme.applyRequestedEventQrSystemBarAppearance
@@ -31,6 +37,24 @@ class EventQrApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Every process cache that holds the signed-in user's data; SessionManager clears them all through
+        // SessionScopedCaches on login, logout and session expiry, without core importing a feature package.
+        SessionScopedCaches.register(LastKnownCache.get(this))
+        SessionScopedCaches.register { RegistrationsCache.clear() }
+        SessionScopedCaches.register { CurrentUserCache.invalidate() }
+        SessionScopedCaches.register { OrganizerEventsCache.shared.clear() }
+        SessionScopedCaches.register { AssignedEventsCache.shared.clear() }
+        // The remembered organizer selection is the previous session's pick; it must not survive a logout,
+        // a login or an expiry either. The clearer reads the latest context off the companion instead of
+        // capturing this Application: the registry is process-static and would otherwise pin every instance.
+        appContext = this
+        SessionScopedCaches.register {
+            appContext
+                ?.getSharedPreferences(OrganizerRepository.SELECTION_PREFS, MODE_PRIVATE)
+                ?.edit()
+                ?.clear()
+                ?.commit()
+        }
         // Start the slow Keystore/EncryptedSharedPreferences init now, in parallel with activity creation.
         SessionManager.warmUp(this)
         EventDecisionNotifier.schedule(this)
@@ -104,7 +128,8 @@ class EventQrApplication : Application() {
             // Called from an OkHttp thread once the server has refused the refresh token.
             Handler(Looper.getMainLooper()).post {
                 pendingRole = null
-                RegistrationsCache.clear()
+                // Last-known data must never outlive the session it belongs to.
+                SessionScopedCaches.clearAll()
                 Toast.makeText(this, this.getString(R.string.event_qr_application_your_session_has_expired_please_sign), Toast.LENGTH_LONG).show()
                 startActivities(AppNavigator.signedOutStack(this))
             }
@@ -122,5 +147,14 @@ class EventQrApplication : Application() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
             fade.toBundle()
         )
+    }
+
+    private companion object {
+        /**
+         * The latest application context, for clearers registered in the process-static
+         * [SessionScopedCaches] registry: capturing `this` in a lambda there would pin every instance.
+         */
+        @Volatile
+        private var appContext: Application? = null
     }
 }

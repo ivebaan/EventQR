@@ -56,6 +56,7 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
     private val eventOptions = mutableListOf<EventPickerOption>()
     private var selectedEventId: String? = null
     private var attendeeUserId: String? = null
+    private lateinit var sessionManager: SessionManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -159,7 +160,8 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
             loadSelectedEventRewards(option)
         }
 
-        attendeeUserId = SessionManager(this).getUserId()
+        sessionManager = SessionManager(this)
+        attendeeUserId = sessionManager.getUserId()
         loadRegisteredEvents()
     }
 
@@ -268,13 +270,20 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
     private fun refreshRewardsPreservingSelection() {
         val previousEventId = selectedEventId
         if (previousEventId.isNullOrBlank()) {
-            loadRegisteredEvents()
+            loadRegisteredEvents(forceNetwork = true)
             return
         }
-        loadRegisteredEvents(preferredEventId = previousEventId)
+        loadRegisteredEvents(preferredEventId = previousEventId, forceNetwork = true)
     }
 
-    private fun loadRegisteredEvents(preferredEventId: String? = selectedEventId ?: intent.getStringExtra(EXTRA_EVENT_ID).orEmpty().ifBlank { null }) {
+    /**
+     * @param forceNetwork pull-to-refresh and Retry always ask the network; an open serves a fresh
+     *   full `registrations/me` answer already on hand (dashboard/my passes likely just fetched it).
+     */
+    private fun loadRegisteredEvents(
+        preferredEventId: String? = selectedEventId ?: intent.getStringExtra(EXTRA_EVENT_ID).orEmpty().ifBlank { null },
+        forceNetwork: Boolean = false,
+    ) {
         errorContainer.visibility = View.GONE
         errorText.visibility = View.GONE
         retryButton.visibility = View.GONE
@@ -284,14 +293,21 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         rewardsBalanceCard.visibility = View.VISIBLE
         claimsAction.visibility = View.GONE
 
-        // If we already know from cache that the user has no registered events,
-        // skip the skeleton loading and immediately show the empty state.
-        val cacheSaysNoRegistrations = RegistrationsCache.get()?.none {
+        // A fresh full answer for this user is served as is: the dashboard or my passes just fetched
+        // it, so opening Rewards must not ask again. Pull-to-refresh/Retry always ask.
+        val cachedRegistrations = if (forceNetwork) null else RegistrationsCache.fresh(sessionManager.getUserId())
+
+        // If the cache already says the user has no registered events, paint that state at once
+        // instead of putting a skeleton in front of an answer we hold.
+        val cacheSaysNoRegistrations = cachedRegistrations?.none {
             it.status != RegistrationStatus.CANCELLED &&
                 it.status != RegistrationStatus.NO_SHOW &&
                 it.eventId.toString().isNotBlank()
         } == true
 
+        // The reward-list slot keeps its skeleton until this load settles. It must not depend on the
+        // registrations answer: a fresh process-cache hit resolves the events at once, and a body
+        // painted before the reward read lands would show an empty list and a blank balance.
         val showSkeleton = !swipeRefresh.isRefreshing && !cacheSaysNoRegistrations
         // The picker precedes this load: it shows its own loading copy until the events answer.
         eventPicker.setLoading(true)
@@ -309,7 +325,9 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
         }
 
         lifecycleScope.launch {
-            when (val registrationsResult = repository.getMyRegistrations()) {
+            val registrationsResult = cachedRegistrations?.let { NetworkResult.Success(it) }
+                ?: repository.getMyRegistrations()
+            when (registrationsResult) {
                 is NetworkResult.Success -> {
                     val loaded = registrationsResult.data
                         .filter { it.status != RegistrationStatus.CANCELLED && it.status != RegistrationStatus.NO_SHOW }
@@ -332,6 +350,9 @@ open class AttendeeRewardsActivity : AppCompatActivity(), RewardsContract.View {
                         eventPicker.setOptions(emptyList(), null)
                         emptyEventsText.visibility = View.VISIBLE
                         layoutRewardsContent.visibility = View.GONE
+                        // No event means no reward read will ever run to hide the slot's skeleton.
+                        skeletonEventName.visibility = View.GONE
+                        layoutRewardsSkeleton.visibility = View.GONE
                         claimsAction.visibility = View.GONE
                         return@launch
                     }

@@ -215,7 +215,7 @@ class EventsPresenterTest {
     fun freshRegistrationsCache_skipsTheRegistrationsCall() {
         val view = RecordingView()
         val event = event(0)
-        RegistrationsCache.set(listOf(registration(event.eventId, RegistrationStatus.REGISTERED)))
+        RegistrationsCache.set(listOf(registration(event.eventId, RegistrationStatus.REGISTERED)), null)
         val repo = FakeRepo(
             events = NetworkResult.Success(listOf(event)),
             registrations = NetworkResult.Error("must not be fetched"),
@@ -240,7 +240,7 @@ class EventsPresenterTest {
         RegistrationsCache.addRegistration(
             registration(justRegistered.eventId, RegistrationStatus.REGISTERED),
         )
-        assertFalse("a merge into a null cache is not a full answer", RegistrationsCache.isFresh())
+        assertFalse("a merge into a null cache is not a full answer", RegistrationsCache.isFresh(null))
         val repo = FakeRepo(
             events = NetworkResult.Success(listOf(justRegistered, otherLive)),
             registrations = NetworkResult.Success(
@@ -264,7 +264,7 @@ class EventsPresenterTest {
         val view = RecordingView()
         val live = event(0)
         val cancelled = event(0)
-        RegistrationsCache.set(listOf(registration(live.eventId, RegistrationStatus.REGISTERED)))
+        RegistrationsCache.set(listOf(registration(live.eventId, RegistrationStatus.REGISTERED)), null)
         RegistrationsCache.addRegistration(registration(cancelled.eventId, RegistrationStatus.CANCELLED))
         val repo = FakeRepo(
             events = NetworkResult.Success(listOf(live, cancelled)),

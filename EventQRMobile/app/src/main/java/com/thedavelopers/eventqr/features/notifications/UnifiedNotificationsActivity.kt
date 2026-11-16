@@ -3,12 +3,15 @@ package com.thedavelopers.eventqr.features.notifications
 import android.os.Bundle
 import android.content.Intent
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import android.view.View
 import android.widget.TextView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.AttendeeSnapshots
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.ui.components.setContentWithDetailHeader
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -38,7 +41,15 @@ import java.util.UUID
 
 open class UnifiedNotificationsActivity : AppCompatActivity() {
 
-    private lateinit var repository: NotificationsRepository
+    /** Tests set these before the first load to replace the network repository and the cache. */
+    internal var repositoryOverride: NotificationsRepository? = null
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val repository: NotificationsRepository
+        get() = repositoryOverride ?: NotificationsRepository(this)
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private val _notifications = MutableStateFlow<List<NotificationResponse>>(emptyList())
     private val _isLoading = MutableStateFlow(false)
     private val _errorMessage = MutableStateFlow<String?>(null)
@@ -46,9 +57,16 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
     private val actionFailure = NotificationActionFailure()
     private var lastFailedOp: (() -> Unit)? = null
 
+    /** Test handle: the list the Compose screen renders. */
+    @VisibleForTesting
+    internal val renderedNotifications: List<NotificationResponse> get() = _notifications.value
+
+    /** Test handle: the spinner state, which the screen shows only over an empty list. */
+    @VisibleForTesting
+    internal val loadingForTest: Boolean get() = _isLoading.value
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = NotificationsRepository(this)
 
         val header = setContentWithDetailHeader("Notifications") {
             EventQrTheme {
@@ -102,18 +120,39 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
     }
 
     protected fun loadNotifications() {
-        _isLoading.value = true
         _errorMessage.value = null
+        // The spinner is a first-load state: with rows already painted (a snapshot) the refresh runs
+        // under them, and only the pull or the retry ever shows a progress state.
+        val paintSnapshot = _notifications.value.isEmpty()
+        _isLoading.value = paintSnapshot
         lifecycleScope.launch {
+            // Captured before the read: an account switch in flight must not refile this list under
+            // whoever is signed in when it lands.
+            val owner = cache.currentOwner()
+            if (paintSnapshot) {
+                cache.read<List<NotificationResponse>>(
+                    AttendeeSnapshots.NOTIFICATIONS,
+                    AttendeeSnapshots.NOTIFICATIONS_TYPE,
+                    AttendeeSnapshots.MAX_AGE_MS,
+                )?.let { snapshot ->
+                    _notifications.value = snapshot.data
+                    _isLoading.value = false
+                }
+            }
             when (val result = repository.getMyNotifications()) {
                 is NetworkResult.Success -> {
                     _notifications.value = result.data
                     _isLoading.value = false
+                    cache.write(AttendeeSnapshots.NOTIFICATIONS, result.data, owner)
                 }
                 is NetworkResult.Error -> {
                     _isLoading.value = false
-                    _errorMessage.value = result.message.ifBlank {
-                        getString(R.string.ui_notifications_load_failed)
+                    // A failed refresh over the painted snapshot keeps it: the error state owns the
+                    // body only when there is nothing to show.
+                    if (_notifications.value.isEmpty()) {
+                        _errorMessage.value = result.message.ifBlank {
+                            getString(R.string.ui_notifications_load_failed)
+                        }
                     }
                 }
                 NetworkResult.Loading -> Unit
@@ -121,16 +160,22 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
         }
     }
 
-    private fun markRead(notificationId: UUID) {
+    @VisibleForTesting
+    internal fun markRead(notificationId: UUID) {
         val previous = _notifications.value
         _notifications.value = withReadState(previous, setOf(notificationId))
         lifecycleScope.launch {
+            // The owner of the request, fixed before it is sent; the write follows the server's answer.
+            val owner = cache.currentOwner()
             // The shade copy only leaves once the server stored the read, so a failed mark keeps it.
             val result = EventDecisionNotifier.markRead(this@UnifiedNotificationsActivity, listOf(notificationId.toString())) {
                 repository.markNotificationRead(notificationId.toString())
             }
             when (result) {
-                is NetworkResult.Success -> clearActionFailure()
+                is NetworkResult.Success -> {
+                    clearActionFailure()
+                    persistReadState(owner)
+                }
                 is NetworkResult.Error -> {
                     _notifications.value = previous
                     showActionFailure(result.message) { markRead(notificationId) }
@@ -145,11 +190,15 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
         _notifications.value = withReadState(previous, previous.map { it.notificationId }.toSet())
         val ids = previous.map { it.notificationId.toString() }
         lifecycleScope.launch {
+            val owner = cache.currentOwner()
             val result = EventDecisionNotifier.markRead(this@UnifiedNotificationsActivity, ids) {
                 repository.markAllNotificationsRead()
             }
             when (result) {
-                is NetworkResult.Success -> clearActionFailure()
+                is NetworkResult.Success -> {
+                    clearActionFailure()
+                    persistReadState(owner)
+                }
                 is NetworkResult.Error -> {
                     _notifications.value = previous
                     showActionFailure(result.message) { markAllRead() }
@@ -157,6 +206,15 @@ open class UnifiedNotificationsActivity : AppCompatActivity() {
                 NetworkResult.Loading -> Unit
             }
         }
+    }
+
+    /**
+     * The server accepted the read flags on screen, so the persisted list must carry them: a reopened
+     * screen paints the snapshot first, and an older unread state there would be a lie. [owner] is the
+     * session the mark-read request was sent for, captured before it.
+     */
+    private suspend fun persistReadState(owner: String) {
+        cache.write(AttendeeSnapshots.NOTIFICATIONS, _notifications.value, owner)
     }
 
     /**

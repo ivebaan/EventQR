@@ -70,6 +70,7 @@ import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRequest
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
 import java.util.UUID
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 import retrofit2.Retrofit
@@ -103,6 +104,7 @@ open class ManageRewardsActivity : AppCompatActivity() {
     private var redemptions: List<RewardRedemptionResponse> = emptyList()
     private var eventOptions: List<OrganizerMvpEvent> = emptyList()
     private var rewardsEnabled: Boolean = false
+    private var eventsLoadJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -131,6 +133,8 @@ open class ManageRewardsActivity : AppCompatActivity() {
 
         // Before an event is resolved (e.g. the event list failed to load) a pull retries that load instead.
         refreshLayout.setOnRefreshListener {
+            // Pull-to-refresh bypasses the shared snapshot: the user asked for fresh rows.
+            repository.invalidateEvents()
             if (::selectedEvent.isInitialized) loadRewards(showInitialLoading = false) else loadEvents()
         }
         // Nothing to refresh until an event is resolved; re-enabled below once the event list loads.
@@ -140,7 +144,10 @@ open class ManageRewardsActivity : AppCompatActivity() {
     }
 
     private fun loadEvents() {
-        lifecycleScope.launch { onEventsLoaded(repository.loadApprovedOrganizerEvents()) }
+        // A newer reload (swipe/retry) replaces the in-flight one, so a read that started before the
+        // snapshot was invalidated cannot repaint stale picker rows when it lands.
+        eventsLoadJob?.cancel()
+        eventsLoadJob = lifecycleScope.launch { onEventsLoaded(repository.loadApprovedOrganizerEvents()) }
     }
 
     @VisibleForTesting

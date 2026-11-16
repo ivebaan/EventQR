@@ -1,10 +1,12 @@
 package com.thedavelopers.eventqr.features.staff
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -13,6 +15,8 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.StaffSnapshots
 import com.thedavelopers.eventqr.core.session.SessionManager
 import com.thedavelopers.eventqr.core.util.RoleMapper
 import com.thedavelopers.eventqr.features.staff.model.dto.StaffAssignedEventResponse
@@ -23,6 +27,7 @@ import com.thedavelopers.eventqr.ui.components.asFilterChips
 import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -31,6 +36,20 @@ import java.time.Instant
  * shared EventCard rows. Filter state is the chip fill only - no check icon, no stroke swap.
  */
 open class StaffAssignedEventsActivity : AppCompatActivity() {
+    private var repositoryFactory: (Context) -> StaffRepository = { StaffRepository(it) }
+
+    /** Tests set these before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> StaffRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: StaffRepository
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: StaffAssignedEventAdapter
@@ -47,6 +66,7 @@ open class StaffAssignedEventsActivity : AppCompatActivity() {
     private var selectedFilter: StaffEventFilter = StaffEventFilter.ALL
     private var allEvents: List<StaffAssignedEventResponse> = emptyList()
     private var loadFailed = false
+    private var loadJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,7 +81,7 @@ open class StaffAssignedEventsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_staff_assigned_events)
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
-        repository = StaffRepository(this)
+        repository = repositoryFactory(this)
 
         countView = findViewById<TextView>(R.id.passHeadTitleCount).apply { visibility = View.VISIBLE }
         PassHeadBinder.bindCompact(
@@ -75,8 +95,10 @@ open class StaffAssignedEventsActivity : AppCompatActivity() {
         skeletonLoading = findViewById(R.id.skeletonLoading)
         swipeRefresh = findViewById(R.id.swipeRefreshAssignedEvents)
         swipeRefresh.setOnRefreshListener {
+            // A pull bypasses the snapshot: the memory copy goes, the persisted one is kept and rewritten
+            // on success, so a failed pull still leaves the next cold open something to paint.
             repository.invalidateEvents()
-            loadEvents(showLoading = false)
+            loadEvents(showLoading = false, forceNetwork = true)
         }
 
         chipAll = findViewById(R.id.chipAll)
@@ -132,11 +154,17 @@ open class StaffAssignedEventsActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadEvents(showLoading: Boolean = true) {
-        if (showLoading && !swipeRefresh.isRefreshing) {
-            skeletonLoading.visibility = View.VISIBLE
-        }
-        lifecycleScope.launch {
+    /** Test handle: a pull (forceNetwork) bypasses the persisted snapshot. */
+    @VisibleForTesting
+    internal fun loadEvents(showLoading: Boolean = true, forceNetwork: Boolean = false) {
+        loadJob?.cancel()
+        loadJob = lifecycleScope.launch {
+            // The persisted list paints first: a cold open shows the rows with no skeleton, and the
+            // refresh lands under them.
+            if (!forceNetwork && allEvents.isEmpty()) paintSnapshot()
+            if (showLoading && !swipeRefresh.isRefreshing && allEvents.isEmpty()) {
+                skeletonLoading.visibility = View.VISIBLE
+            }
             when (val result = repository.getEvents()) {
                 is NetworkResult.Success -> {
                     allEvents = result.data
@@ -144,23 +172,38 @@ open class StaffAssignedEventsActivity : AppCompatActivity() {
                     renderFilteredEvents()
                 }
                 is NetworkResult.Error -> {
-                    loadFailed = true
-                    allEvents = emptyList()
-                    adapter.submitItems(emptyList())
-                    emptyState.setIcon(AppIcons.Warning)
-                    emptyState.show(
-                        getString(R.string.ui_staff_events_error_title),
-                        result.message.ifBlank { getString(R.string.ui_staff_load_failed_body) },
-                    )
-                    emptyState.setAction(getString(R.string.common_retry)) { loadEvents() }
-                    emptyState.visibility = View.VISIBLE
-                    countView.text = ""
+                    // A failed refresh keeps the painted rows; the error state owns the screen only
+                    // when there is nothing to show.
+                    if (allEvents.isEmpty()) {
+                        loadFailed = true
+                        adapter.submitItems(emptyList())
+                        emptyState.setIcon(AppIcons.Warning)
+                        emptyState.show(
+                            getString(R.string.ui_staff_events_error_title),
+                            result.message.ifBlank { getString(R.string.ui_staff_load_failed_body) },
+                        )
+                        emptyState.setAction(getString(R.string.common_retry)) { loadEvents() }
+                        emptyState.visibility = View.VISIBLE
+                        countView.text = ""
+                    }
                     skeletonLoading.visibility = View.GONE
                 }
                 NetworkResult.Loading -> Unit
             }
             swipeRefresh.isRefreshing = false
         }
+    }
+
+    /** Paints the persisted `staff/assignments` list so the screen is readable before the network. */
+    private suspend fun paintSnapshot() {
+        val events = cache.read<List<StaffAssignedEventResponse>>(
+            StaffSnapshots.ASSIGNMENTS,
+            StaffSnapshots.ASSIGNMENTS_TYPE,
+            StaffSnapshots.MAX_AGE_MS,
+        )?.data ?: return
+        allEvents = events
+        loadFailed = false
+        renderFilteredEvents()
     }
 
     private fun renderFilteredEvents() {

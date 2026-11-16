@@ -1,6 +1,9 @@
 package com.thedavelopers.eventqr.features.dashboard
 
 import com.thedavelopers.eventqr.R
+import android.util.Log
+import com.thedavelopers.eventqr.core.cache.AttendeeSnapshots
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.core.util.UiStrings
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.RedemptionStatus
@@ -12,6 +15,7 @@ import com.thedavelopers.eventqr.features.dashboard.model.dto.DashboardUpcomingE
 import com.thedavelopers.eventqr.features.events.EventStatusBadgeStyler
 import com.thedavelopers.eventqr.features.events.model.dto.AttendeeEventResponse
 import com.thedavelopers.eventqr.features.registrations.RegistrationsCache
+import com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationResponse
 import com.thedavelopers.eventqr.ui.components.PassStat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -32,8 +36,13 @@ class DashboardPresenter(
     private val sessionManager: SessionManager,
     private val strings: UiStrings,
     private val scope: CoroutineScope = MainScope(),
+    /** The persisted last-known layer; null keeps the screen network-only (unit tests). */
+    private val cache: LastKnownCache? = null,
 ) {
     private var dashboardJob: Job? = null
+
+    /** True once a summary is on screen: from then on a snapshot would be older than the content. */
+    private var painted = false
 
     fun attach(view: DashboardContract.View) {
         this.view = view
@@ -49,7 +58,7 @@ class DashboardPresenter(
      * be claimed after check-in). Null = unknown: any failed call keeps the cell on `--`.
      */
     private suspend fun claimedRewardsCount(
-        registrations: List<com.thedavelopers.eventqr.features.registrations.model.dto.RegistrationResponse>,
+        registrations: List<RegistrationResponse>,
     ): Long? = coroutineScope {
         val eventIds = registrations
             .filter { it.status != RegistrationStatus.CANCELLED && (it.attendedAt != null || it.enteredAt != null) }
@@ -69,10 +78,21 @@ class DashboardPresenter(
         }
     }
 
-    fun loadDashboard() {
+    fun loadDashboard(forceNetwork: Boolean = false) {
         view?.updateHeader(sessionManager.getUserRole(), sessionManager.getFullName())
-        view?.showLoading(true)
+        // A reload (resume, pull-to-refresh) supersedes the previous one, including its background
+        // redemptions fan-out: a late answer must not overwrite the newer numbers.
+        dashboardJob?.cancel()
         dashboardJob = scope.launch {
+            // Captured before any read: an account switch in flight must not refile this answer under
+            // whoever is signed in when it lands.
+            val owner = cache?.currentOwner().orEmpty()
+            // A cold open paints the last known screen before the network answers. A pull-to-refresh
+            // bypasses the snapshot, and a reload over rows already on screen keeps them: painting an
+            // older copy over newer content would be a downgrade.
+            val fromSnapshot = !forceNetwork && !painted && paintSnapshot()
+            // After a snapshot paint this is a no-op on screen: the activity keeps content visible.
+            view?.showLoading(true)
             val currentUserDeferred = async { repository.getCurrentUser() }
             val summaryDeferred = async { repository.getSummary() }
             val eventsDeferred = async {
@@ -90,7 +110,17 @@ class DashboardPresenter(
                     }
                 }
             }
-            val registrationsDeferred = async { attendeeRepository.getMyRegistrations() }
+            val registrationsDeferred = async {
+                // A fresh full answer already on hand (dashboard, my passes, discover, rewards all
+                // read `registrations/me`) is served as is: an open must not emit it again.
+                if (forceNetwork) {
+                    attendeeRepository.getMyRegistrations()
+                } else {
+                    RegistrationsCache.fresh(sessionManager.getUserId())
+                        ?.let { NetworkResult.Success(it) }
+                        ?: attendeeRepository.getMyRegistrations()
+                }
+            }
 
             val currentUserResult = currentUserDeferred.await()
             if (currentUserResult is NetworkResult.Success) {
@@ -104,17 +134,15 @@ class DashboardPresenter(
             val eventsResult = eventsDeferred.await()
             val registrationsResult = registrationsDeferred.await()
 
-            // The "Rewards claimed" cell needs one redemptions call per attended event, so it is
-            // resolved before the spinner drops and the summary renders in one pass.
-            val rewardsClaimedCount: Long? = if (registrationsResult is NetworkResult.Success) {
-                claimedRewardsCount(registrationsResult.data)
-            } else {
-                null
-            }
-
+            // The four calls above are everything the screen needs: paint now, then resolve the
+            // "Rewards claimed" cell (one redemptions call per attended event) in the background.
+            // Until it lands that cell keeps the unknown "--", so the late answer reflows nothing.
             view?.showLoading(false)
 
             val now = Instant.now()
+            // "Rewards claimed" is unknown until the fan-out at the end of this load answers, so the
+            // cell keeps the pass head's "--" placeholder: a late answer reflows no other number.
+            val deferredRewardsCount: Long? = null
             val events = if (eventsResult is NetworkResult.Success) eventsResult.data else emptyList()
             val registrations = if (registrationsResult is NetworkResult.Success) registrationsResult.data else emptyList()
 
@@ -247,12 +275,20 @@ class DashboardPresenter(
                     checkInsCount = checkInsCount,
                     lifetimeRegistrationsCount = lifetimeRegistrationsCount,
                     upcomingCount = upcomingCount,
-                    rewardsClaimedCount = rewardsClaimedCount,
+                    rewardsClaimedCount = deferredRewardsCount,
                     upcomingEvents = nextEventList,
                     discoverEvents = discoverEvents,
                 )
+                painted = true
                 view?.showSummary(summary)
-            } else if (allEvents.isNotEmpty() || registrations.isNotEmpty()) {
+                // Only a complete answer is worth painting on the next cold open. A failed
+                // registrations leg leaves every pass-head cell unknown, and a failed events leg
+                // leaves the row blocks empty: either one would persist "--" counts or a false
+                // "no upcoming events" that a later failure then keeps on screen.
+                if (eventsResult is NetworkResult.Success && registrationsResult is NetworkResult.Success) {
+                    persistSnapshot(summary, owner)
+                }
+            } else if (!fromSnapshot && (allEvents.isNotEmpty() || registrations.isNotEmpty())) {
                 val fallbackSummary = DashboardSummary(
                     totalEvents = events.size.toLong(),
                     totalRegistrations = registeredCount,
@@ -262,13 +298,14 @@ class DashboardPresenter(
                     checkInsCount = checkInsCount,
                     lifetimeRegistrationsCount = lifetimeRegistrationsCount,
                     upcomingCount = upcomingCount,
-                    rewardsClaimedCount = rewardsClaimedCount,
+                    rewardsClaimedCount = deferredRewardsCount,
                     totalNotifications = 0L,
                     fullName = sessionManager.getFullName(),
                     upcomingEvents = nextEventList,
                     discoverEvents = discoverEvents,
                 )
                 view?.showSummary(fallbackSummary)
+                painted = true
                 if (summaryResult is NetworkResult.Error) {
                     view?.showPartialError("stats", summaryResult.message)
                 }
@@ -285,11 +322,73 @@ class DashboardPresenter(
             if (registrationsResult is NetworkResult.Error) {
                 view?.showPartialError("registrations", registrationsResult.message)
             }
+
+            // Last: the per-event redemptions fan-out the cells above do not need. Its failure is
+            // not a screen failure - the cell simply keeps "--" and the rest stays as painted.
+            if (registrationsResult is NetworkResult.Success) {
+                val rewards = claimedRewardsCount(registrationsResult.data)
+                if (rewards != null) {
+                    view?.showRewardsCount(rewards)
+                } else {
+                    Log.d(TAG, "claimed rewards unknown; pass-head cell keeps its placeholder")
+                }
+            }
         }
     }
 
     fun openSection(title: String, message: String) {
         view?.openSection(title, message)
+    }
+
+    /**
+     * Paints the persisted dashboard before the network answers: the summary as it was last
+     * rendered, its upcoming rows, and the pass-head counts recomputed from the persisted
+     * registrations list (that list can be newer than the summary, and the cells must not show a
+     * count the attendee has already changed).
+     *
+     * @return true when something was painted, so a later failed refresh keeps it instead of
+     *   replacing it with the partial-data fallback.
+     */
+    private suspend fun paintSnapshot(): Boolean {
+        val cache = cache ?: return false
+        val summary = cache.read<DashboardSummary>(
+            AttendeeSnapshots.DASHBOARD_SUMMARY,
+            AttendeeSnapshots.SUMMARY_TYPE,
+            AttendeeSnapshots.MAX_AGE_MS,
+        )?.data ?: return false
+        val upcoming = cache.read<List<DashboardUpcomingEvent>>(
+            AttendeeSnapshots.DASHBOARD_UPCOMING,
+            AttendeeSnapshots.UPCOMING_TYPE,
+            AttendeeSnapshots.MAX_AGE_MS,
+        )?.data
+        val registrations = cache.read<List<RegistrationResponse>>(
+            AttendeeSnapshots.REGISTRATIONS,
+            AttendeeSnapshots.REGISTRATIONS_TYPE,
+            AttendeeSnapshots.MAX_AGE_MS,
+        )?.data
+
+        val now = Instant.now()
+        val counts = registrations?.let { DashboardStats.attendeeCounts(it, now) }
+        val tabs = registrations?.let { DashboardStats.registrationCounts(it, now) }
+        painted = true
+        view?.showSummary(
+            summary.copy(
+                totalRegistrations = counts?.registered?.toLong() ?: summary.totalRegistrations,
+                completedEventsCount = tabs?.completed?.toLong() ?: summary.completedEventsCount,
+                checkInsCount = counts?.checkIns?.toLong() ?: summary.checkInsCount,
+                lifetimeRegistrationsCount = counts?.events?.toLong() ?: summary.lifetimeRegistrationsCount,
+                upcomingCount = counts?.upcoming?.toLong() ?: summary.upcomingCount,
+                upcomingEvents = upcoming ?: summary.upcomingEvents,
+            ),
+        )
+        return true
+    }
+
+    /** Stores the answer this load painted, so the next cold open starts from it. */
+    private suspend fun persistSnapshot(summary: DashboardSummary, owner: String) {
+        val cache = cache ?: return
+        cache.write(AttendeeSnapshots.DASHBOARD_SUMMARY, summary, owner)
+        cache.write(AttendeeSnapshots.DASHBOARD_UPCOMING, summary.upcomingEvents.orEmpty(), owner)
     }
 
     fun logout() {
@@ -300,6 +399,10 @@ class DashboardPresenter(
     private fun computeEventStatus(event: AttendeeEventResponse, now: Instant): String {
         val status = EventStatusBadgeStyler.resolve(event.status, event.eventStartAt, event.eventEndAt, now)
         return EventStatusBadgeStyler.displayLabel(status)
+    }
+
+    private companion object {
+        const val TAG = "DashboardPresenter"
     }
 }
 

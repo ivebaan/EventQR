@@ -1,5 +1,6 @@
 package com.thedavelopers.eventqr.features.organizer.dashboard
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -15,11 +16,13 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.NotificationStatus
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.session.SessionManager
+import com.thedavelopers.eventqr.core.session.SessionRefresher
 import com.thedavelopers.eventqr.core.util.EventCardPresenter
 import com.thedavelopers.eventqr.core.util.PortalSwitcher
 import com.thedavelopers.eventqr.core.util.RoleMapper
-import com.thedavelopers.eventqr.features.auth.AuthRepository
 import com.thedavelopers.eventqr.features.attendee.RequestEventActivity
 import com.thedavelopers.eventqr.features.organizer.NAV_DASHBOARD
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpDataSource
@@ -44,6 +47,10 @@ import com.thedavelopers.eventqr.ui.components.PassStat
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
 import com.thedavelopers.eventqr.ui.theme.color
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.time.LocalDate
@@ -64,6 +71,24 @@ import java.util.Locale
  */
 open class OrganizerDashboardActivity : AppCompatActivity() {
     private val TAG = "OrganizerDashboardActivity"
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to point the snapshot reads at their own directory. */
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
+    /** The session-resume path: throttled by [SessionRefresher.refreshIfStale], never a forced rotation. */
+    @VisibleForTesting
+    internal var sessionRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshIfStale(it) }
+
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
     private lateinit var repository: OrganizerRepository
     private lateinit var sessionManager: SessionManager
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
@@ -78,6 +103,7 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
     private var isSwipeRefreshing = false
     private var isFirstResume = true
     private var hasRenderedContent = false
+    private var loadJob: Job? = null
 
     private val organizerZone: ZoneId = ZoneId.of("Asia/Manila")
     private val dayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("d", Locale.ENGLISH)
@@ -98,7 +124,7 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
 
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
         sessionManager = SessionManager(this)
         passHead = findViewById(R.id.passHead)
         swipeRefreshLayout = findViewById(R.id.swipeRefreshDashboard)
@@ -112,7 +138,9 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
 
         swipeRefreshLayout.setOnRefreshListener {
             isSwipeRefreshing = true
-            loadDashboard()
+            // Pull-to-refresh bypasses both snapshots: the user asked for fresh rows.
+            repository.invalidateEvents()
+            loadDashboard(forceNetwork = true)
         }
 
         setupNavigation()
@@ -121,11 +149,10 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
 
         // Re-issue the access token so the CURRENT database role is used (an attendee
         // upgraded to organizer after approval should be able to open this dashboard
-        // immediately, without a logout/login).
-        lifecycleScope.launch {
-            AuthRepository(this@OrganizerDashboardActivity).refreshSessionToken()
-            loadDashboard()
-        }
+        // immediately, without a logout/login). Throttled (10 min / near-expiry) and fired
+        // without awaiting it: the first paint never waits for the session refresh.
+        lifecycleScope.launch { sessionRefresh(this@OrganizerDashboardActivity) }
+        loadDashboard()
     }
 
     override fun onResume() {
@@ -135,6 +162,8 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
         // the onCreate load.
         if (!isFirstResume) {
             resumeReloads++
+            // Returning here must not spend a refresh token every time: same throttled path.
+            lifecycleScope.launch { sessionRefresh(this@OrganizerDashboardActivity) }
             loadDashboard()
         }
         isFirstResume = false
@@ -215,40 +244,69 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
 
     // ── Data ─────────────────────────────────────────────────────────────────
 
-    internal open fun loadDashboard() {
-        if (!isSwipeRefreshing && !hasRenderedContent) {
-            skeletonLoading.visibility = View.VISIBLE
-            // The skeleton and the empty state describe the same slot: a reload over a zero-event
-            // screen must not claim both that it is loading and that there are no events.
-            emptyEvents.visibility = View.GONE
-        } else {
-            // A reload over readable content refreshes in place: no skeleton over the rows.
-            skeletonLoading.visibility = View.GONE
-        }
-
+    internal open fun loadDashboard(forceNetwork: Boolean = false) {
         errorState.hide()
-        lifecycleScope.launch {
+        // A newer load (swipe/retry/resume) replaces the in-flight one: a read that started before
+        // `invalidateEvents()` must not repaint stale rows when it lands.
+        loadJob?.cancel()
+        loadJob = lifecycleScope.launch {
+            // Started alongside the events read so the bell count lands as soon as it can; the
+            // first paint never waits for it - events answer first and render on their own.
+            val notifications = async { runCatching { repository.getMyNotifications() }.getOrNull() }
+            // The persisted rows paint next, in the same coroutine as the load: a cold open shows
+            // the last known screen with no skeleton, and the refresh then lands underneath it.
+            if (!forceNetwork && !hasRenderedContent) paintSnapshot()
+            if (!hasRenderedContent && !isSwipeRefreshing) {
+                skeletonLoading.visibility = View.VISIBLE
+                // The skeleton and the empty state describe the same slot: a reload over a zero-event
+                // screen must not claim both that it is loading and that there are no events.
+                emptyEvents.visibility = View.GONE
+            } else {
+                // A reload over readable content refreshes in place: no skeleton over the rows.
+                skeletonLoading.visibility = View.GONE
+            }
             try {
                 val load = repository.loadEventsForMvp()
                 if (load.source != OrganizerMvpDataSource.ERROR) {
                     hasRenderedContent = true
                 }
                 renderDashboard(load)
-                updateNotificationBadge(repository.getMyNotifications())
+            } catch (cancelled: CancellationException) {
+                // Replaced by a newer load: not a dashboard failure.
+                throw cancelled
             } catch (error: Exception) {
                 skeletonLoading.visibility = View.GONE
-                // The error card is the whole story here too; "no events" under it would
-                // contradict it (`renderDashboard` does the same for a failed load).
-                emptyEvents.visibility = View.GONE
-                errorState.show(
-                    getString(R.string.ui_organizer_dashboard_error_title),
-                    getString(R.string.ui_attendee_load_error_body),
-                )
+                // A failed refresh never replaces painted content (a snapshot or a previous answer).
+                if (!hasRenderedContent) {
+                    // The error card is the whole story here too; "no events" under it would
+                    // contradict it (`renderDashboard` does the same for a failed load).
+                    emptyEvents.visibility = View.GONE
+                    errorState.show(
+                        getString(R.string.ui_organizer_dashboard_error_title),
+                        getString(R.string.ui_attendee_load_error_body),
+                    )
+                }
                 Log.w(TAG, "Dashboard load failed: ${error.message ?: "unknown"}", error)
             } finally {
-                stopSwipeRefresh()
+                // A cancellation must not stop the spinner of the load that replaced it.
+                if (isActive) stopSwipeRefresh()
             }
+            notifications.await()?.let(::updateNotificationBadge)
         }
+    }
+
+    /**
+     * Paints the persisted `organizer/events` answer: the rows, the next event and every number
+     * (they are all derived client-side, plan §6.4), so the screen is complete before the network
+     * replies. The bell keeps its last-known/absent state; it is never a spinner.
+     */
+    private suspend fun paintSnapshot() {
+        val events = cache.read<List<OrganizerMvpEvent>>(
+            OrganizerSnapshots.EVENTS,
+            OrganizerSnapshots.EVENTS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return
+        renderDashboard(OrganizerMvpLoad(events, OrganizerMvpDataSource.BACKEND))
     }
 
     internal fun renderDashboard(
@@ -257,6 +315,11 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
         skeletonLoading.visibility = View.GONE
 
         val hasError = load.source == OrganizerMvpDataSource.ERROR
+        if (hasError && hasRenderedContent) {
+            // A failed refresh keeps what is on screen - rows, numbers and the bell - instead of
+            // replacing it with the error card or with `--` cells.
+            return
+        }
         if (!hasError) hasRenderedContent = true
         val events = load.data.approvedOnly()
         val activeEvents = events.filter { it.lifecycleStatus() == "Active" }

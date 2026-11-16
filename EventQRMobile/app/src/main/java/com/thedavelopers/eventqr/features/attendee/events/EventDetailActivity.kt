@@ -4,6 +4,8 @@ import com.thedavelopers.eventqr.core.util.UiStrings
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.view.View
@@ -66,6 +68,7 @@ open class EventDetailActivity : AppCompatActivity(), EventDetailContract.View {
     private var reapplyAvailability: (() -> Unit)? = null
     private lateinit var errorStrip: View
     private lateinit var emptyState: EventQrEmptyState
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -232,14 +235,14 @@ open class EventDetailActivity : AppCompatActivity(), EventDetailContract.View {
         if (event.rewardsEnabled) {
             // A value already settled for this event survives the re-bind; the fresh read updates it.
             showRewardsLabel(rewardsLabel)
-            loadRewardsAvailability(rewardsEventId)
+            deferPastFirstPaint { loadRewardsAvailability(rewardsEventId) }
         } else {
             setRewardsLabel(rewardsEventId, getString(R.string.ui_attendee_none))
         }
 
         applyStackedRows()
 
-        checkOwnedEventThenAvailability(event)
+        applyOwnership(event)
         updateCancelButtonVisibility()
     }
 
@@ -380,14 +383,25 @@ open class EventDetailActivity : AppCompatActivity(), EventDetailContract.View {
         capacityView.text = getString(R.string.event_detail_capacity_registered, current, capacity)
     }
 
-    private fun checkOwnedEventThenAvailability(event: AttendeeEventResponse) {
+    private fun applyOwnership(event: AttendeeEventResponse) {
         // Ownership is decided by the backend flag regardless of the current role.
         isOwnedByCurrentOrganizer = event.isOwnedByCurrentUser == true
         if (canManageEvent()) {
             setOwnedEventState()
         } else {
-            loadEventAvailability(event)
+            // The register button's final state and the live count are enrichment: the read starts
+            // after this frame so the page paints from the event payload first.
+            deferPastFirstPaint { loadEventAvailability(event) }
         }
+    }
+
+    /**
+     * Runs [block] on the next main-thread turn, so a network read it starts can never sit in front
+     * of the content that just landed. A destroyed screen starts nothing: its jobs would outlive
+     * the views they draw into.
+     */
+    private fun deferPastFirstPaint(block: () -> Unit) {
+        mainHandler.post { if (!isDestroyed) block() }
     }
 
     private fun loadEventAvailability(event: AttendeeEventResponse) {
