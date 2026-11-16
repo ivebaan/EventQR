@@ -233,12 +233,14 @@ class DashboardPresenter(
             // Discover Events selection:
             // All candidates excluding nextEvent
             val remainingCandidates = allEvents.filter { it.eventId != nextEvent?.eventId }
-            val activeOrUpcomingCandidates = remainingCandidates
-                .filter { !isEnded(it) }
+            // Discover is for events the attendee can still join: one that has started no longer offers
+            // Register, so it would be a dead end here (a registered ongoing event stays as Next Event).
+            val upcomingCandidates = remainingCandidates
+                .filter { !isEnded(it) && !isActive(it) }
                 .sortedWith(activeOrUpcomingComparator)
 
-            // Never show past events here; an empty list renders the "No upcoming events" state.
-            val discoverEvents = activeOrUpcomingCandidates.take(5)
+            // Never show past or running events here; an empty list renders the "No upcoming events" state.
+            val discoverEvents = upcomingCandidates.take(5)
 
             // Same definitions as the Registered tab chips: Registered = live registrations whose event
             // has not ended; Completed = live registrations whose event has ended.

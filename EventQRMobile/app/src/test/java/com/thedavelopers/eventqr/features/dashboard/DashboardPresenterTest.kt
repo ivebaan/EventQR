@@ -318,4 +318,32 @@ class DashboardPresenterTest {
         assertEquals(2L, view.rewardsCount)
         assertNull(view.error)
     }
+
+    @Test
+    fun discoverEvents_listOnlyEventsThatHaveNotStarted() {
+        val now = Instant.now()
+        val upcoming = AttendeeEventResponse(
+            eventId = UUID.randomUUID(),
+            title = "Upcoming",
+            eventStartAt = now.plusSeconds(86_400),
+            eventEndAt = now.plusSeconds(90_000),
+        )
+        val running = AttendeeEventResponse(
+            eventId = UUID.randomUUID(),
+            title = "Running",
+            eventStartAt = now.minusSeconds(3_600),
+            eventEndAt = now.plusSeconds(3_600),
+        )
+        val repo = object : AttendeeRepository(context) {
+            override suspend fun getBrowseEvents(): NetworkResult<List<AttendeeEventResponse>> =
+                NetworkResult.Success(listOf(running, upcoming))
+
+            override suspend fun getMyRegistrations() = NetworkResult.Success(emptyList<RegistrationResponse>())
+        }
+        val view = RecordingView()
+
+        presenterFor(view, repo).loadDashboard()
+
+        assertEquals(listOf("Upcoming"), view.summary!!.discoverEvents!!.map { it.title })
+    }
 }
