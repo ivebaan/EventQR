@@ -29,9 +29,11 @@ import com.thedavelopers.eventqr.features.events.service.EventService;
 import com.thedavelopers.eventqr.features.organizer.model.entity.EventStaffAssignment;
 import com.thedavelopers.eventqr.features.organizer.repository.EventStaffAssignmentRepository;
 import com.thedavelopers.eventqr.features.registrations.repository.EventRegistrationRepository;
+import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResponse;
 import com.thedavelopers.eventqr.features.rewards.service.RewardService;
 import com.thedavelopers.eventqr.shared.constants.AccountRole;
 import com.thedavelopers.eventqr.shared.constants.EventStatus;
+import com.thedavelopers.eventqr.shared.constants.RedemptionStatus;
 import com.thedavelopers.eventqr.shared.exceptions.GlobalExceptionHandler;
 import com.thedavelopers.eventqr.shared.security.JwtService;
 
@@ -577,6 +579,57 @@ class RewardAuthorizationTest {
                 .andExpect(status().isOk());
 
         verify(rewardService).findRedemptions(eventId);
+    }
+
+    // --- GET /api/v1/rewards/redemptions/my-redemptions --------------------
+
+    @Test
+    void findMyRedemptions_literalPathBeatsTheEventIdVariable() throws Exception {
+        given(rewardService.findMyRedemptions(callerId)).willReturn(List.of());
+        actingAs(callerId, AccountRole.ATTENDEE);
+
+        mockMvc.perform(get("/api/v1/rewards/redemptions/my-redemptions")
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty());
+
+        // "my-redemptions" is not a UUID: reaching findRedemptions would 400 instead of returning 200.
+        verify(rewardService).findMyRedemptions(callerId);
+        verify(rewardService, never()).findRedemptions(any(UUID.class));
+        verify(rewardService, never()).findRedemptions(any(UUID.class), any());
+    }
+
+    @Test
+    void findMyRedemptions_usesTheTokenSubjectAndNoEventScoping() throws Exception {
+        given(rewardService.findMyRedemptions(otherUserId))
+                .willReturn(List.of(new RewardRedemptionResponse(UUID.randomUUID(), eventId, otherUserId, rewardId,
+                        10, RedemptionStatus.REDEEMED, java.time.Instant.now(), null, null)));
+        actingAs(otherUserId, AccountRole.ATTENDEE);
+
+        mockMvc.perform(get("/api/v1/rewards/redemptions/my-redemptions")
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].eventId").value(eventId.toString()))
+                .andExpect(jsonPath("$.data[0].attendeeUserId").value(otherUserId.toString()));
+
+        verify(rewardService).findMyRedemptions(otherUserId);
+        verify(rewardService, never()).findMyRedemptions(callerId);
+        // No per-event access checks on the aggregate route.
+        verify(eventService, never()).findOne(any());
+        verify(eventRegistrationRepository, never()).existsByEventIdAndAttendeeUserId(any(), any());
+    }
+
+    @Test
+    void findMyRedemptions_emptyHistoryIs200WithEmptyArray() throws Exception {
+        given(rewardService.findMyRedemptions(callerId)).willReturn(List.of());
+        actingAs(callerId, AccountRole.ATTENDEE);
+
+        mockMvc.perform(get("/api/v1/rewards/redemptions/my-redemptions")
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
     }
 
     // --- GET /api/v1/rewards/balance/{eventId}/{attendeeUserId} (unchanged) -

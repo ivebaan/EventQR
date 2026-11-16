@@ -9,6 +9,8 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.util.ScreenInsets
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_ID
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpAttendee
@@ -109,22 +111,40 @@ open class AttendeeDetailsActivity : AppCompatActivity() {
         findViewById<View>(R.id.layoutAttendeeError).visibility = View.GONE
         skeletonLoading.visibility = View.VISIBLE
         lifecycleScope.launch {
+            // The persisted attendee list paints this record first; the network replaces it below.
+            val painted = paintSnapshot(eventId, attendeeId)
             try {
                 val attendeeLoad = repository.loadAttendeesForMvp(eventId)
                 if (attendeeLoad.source == OrganizerMvpDataSource.ERROR) {
-                    showAttendeeError(attendeeLoad.message ?: getString(R.string.attendee_details_record_load_failed))
+                    if (!painted) showAttendeeError(attendeeLoad.message ?: getString(R.string.attendee_details_record_load_failed))
                     return@launch
                 }
                 attendee = attendeeLoad.data.firstOrNull { it.id == attendeeId } ?: run {
-                    showAttendeeError(getString(R.string.attendee_details_record_not_found))
+                    if (!painted) showAttendeeError(getString(R.string.attendee_details_record_not_found))
                     return@launch
                 }
                 renderProfile()
                 renderDetails()
             } catch (error: Exception) {
-                showAttendeeError(error.message ?: getString(R.string.attendee_details_record_load_failed))
+                if (!painted) showAttendeeError(error.message ?: getString(R.string.attendee_details_record_load_failed))
             }
         }
+    }
+
+    /**
+     * Reads the record from the same `organizer/attendees/{eventId}` snapshot the list paints (no
+     * second key, no second fetch shape). False when the event has no snapshot or the record is absent.
+     */
+    private suspend fun paintSnapshot(eventId: String, attendeeId: String): Boolean {
+        val snapshot = LastKnownCache.get(this).read<List<OrganizerMvpAttendee>>(
+            OrganizerSnapshots.attendees(eventId),
+            OrganizerSnapshots.ATTENDEES_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return false
+        attendee = snapshot.firstOrNull { it.id == attendeeId } ?: return false
+        renderProfile()
+        renderDetails()
+        return true
     }
 
     private fun showAttendeeError(message: String) {

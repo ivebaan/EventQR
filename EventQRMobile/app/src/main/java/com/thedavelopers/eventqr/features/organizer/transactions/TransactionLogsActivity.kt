@@ -9,6 +9,7 @@ import com.thedavelopers.eventqr.ui.theme.setTextSizeRes
 import com.thedavelopers.eventqr.ui.theme.strong
 import com.thedavelopers.eventqr.features.organizer.tintBlock
 import com.thedavelopers.eventqr.features.organizer.tintBlockArgb
+import android.content.Context
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.text.Spannable
@@ -20,14 +21,31 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.features.organizer.*
 import com.thedavelopers.eventqr.features.organizer.attendees.SearchAttendeesActivity
 import kotlinx.coroutines.launch
 
 open class TransactionLogsActivity : AppCompatActivity() {
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: OrganizerRepository
     private lateinit var selectedEvent: OrganizerMvpEvent
     private lateinit var list: LinearLayout
@@ -37,7 +55,7 @@ open class TransactionLogsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
         val eventId = intentEventId() ?: return showMissingEventScreen(getString(R.string.transaction_logs_title))
         showEventsLoadingScreen(getString(R.string.transaction_logs_title))
         lifecycleScope.launch {
@@ -59,6 +77,8 @@ open class TransactionLogsActivity : AppCompatActivity() {
                     selectedEvent = it
                     repository.saveSelectedEventId(it.id)
                     saveSelectedEventId(it.id)
+                    // The previous event's rows must not survive into this one, and must not block its paint.
+                    logsSource = OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.BACKEND)
                     loadLogs()
                 })
             }
@@ -68,16 +88,42 @@ open class TransactionLogsActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
             }
             content.addView(list)
-            list.addView(loadingState(getString(R.string.transaction_logs_loading)))
             loadLogs()
         }
     }
 
-    private fun loadLogs() {
+    /** Test handle: a forced load (forceNetwork) bypasses the persisted snapshot. */
+    @VisibleForTesting
+    internal fun loadLogs(forceNetwork: Boolean = false) {
         lifecycleScope.launch {
-            logsSource = repository.loadTransactionsForMvp(selectedEvent.id, selectedEvent.title)
+            val eventIdAtRequestTime = selectedEvent.id
+            // The persisted list paints first: a cold open shows the rows with no loading card.
+            val painted = !forceNetwork && logsSource.data.isEmpty() && paintSnapshot(eventIdAtRequestTime)
+            if (!painted) {
+                list.removeAllViews()
+                list.addView(loadingState(getString(R.string.transaction_logs_loading)))
+            }
+            val load = repository.loadTransactionsForMvp(eventIdAtRequestTime, selectedEvent.title)
+            if (eventIdAtRequestTime != selectedEvent.id) return@launch
+            if (load.source == OrganizerMvpDataSource.ERROR && painted) {
+                // A failed refresh keeps the painted rows instead of replacing them with the error state.
+                return@launch
+            }
+            logsSource = load
             render()
         }
+    }
+
+    /** Paints `organizer/logs/{eventId}` so the list is readable before the network answers. */
+    private suspend fun paintSnapshot(eventId: String): Boolean {
+        val snapshot = cache.read<List<OrganizerMvpTransaction>>(
+            OrganizerSnapshots.logs(eventId),
+            OrganizerSnapshots.LOGS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return false
+        logsSource = OrganizerMvpLoad(snapshot, OrganizerMvpDataSource.BACKEND)
+        render()
+        return true
     }
 
     private fun isApproved(log: OrganizerMvpTransaction): Boolean =

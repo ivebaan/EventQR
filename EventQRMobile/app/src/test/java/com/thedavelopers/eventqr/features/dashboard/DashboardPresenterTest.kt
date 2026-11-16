@@ -20,6 +20,8 @@ import com.thedavelopers.eventqr.features.users.model.dto.UserResponse
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -29,6 +31,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import retrofit2.HttpException
+import retrofit2.Response
 import java.time.Instant
 import java.util.UUID
 
@@ -98,27 +102,41 @@ class DashboardPresenterTest {
         override suspend fun getMyRegistrations() = registrations
     }
 
-    /** The redemptions fan-out stays suspended until the test releases it. */
+    /** The all-redemptions read stays suspended until the test releases it. */
     private inner class GatedRedemptionsRepo(
-        private val registration: RegistrationResponse,
+        private val registrations: List<RegistrationResponse>,
         private val redemption: NetworkResult<List<RewardRedemptionResponse>> = NetworkResult.Success(
-            listOf(redemption(registration.eventId, RedemptionStatus.REDEEMED), redemption(registration.eventId, RedemptionStatus.PENDING)),
+            registrations.map { redemption(it.eventId, RedemptionStatus.REDEEMED) }
         ),
+        private val perEventRedemption: NetworkResult<List<RewardRedemptionResponse>> = redemption,
         val gate: CompletableDeferred<Unit>? = CompletableDeferred(),
     ) : AttendeeRepository(context) {
+        /** Calls to the one-call endpoint. */
+        var allRedemptionCalls = 0
+        /** Calls to the legacy per-event read: only the 404 fallback may make any. */
         var redemptionCalls = 0
 
         override suspend fun getBrowseEvents(): NetworkResult<List<AttendeeEventResponse>> =
             NetworkResult.Success(listOf(AttendeeEventResponse(eventId = UUID.randomUUID(), title = "Event")))
 
-        override suspend fun getMyRegistrations() = NetworkResult.Success(listOf(registration))
+        override suspend fun getMyRegistrations() = NetworkResult.Success(registrations)
+
+        override suspend fun getMyAllRedemptions(): NetworkResult<List<RewardRedemptionResponse>> {
+            allRedemptionCalls++
+            gate?.await()
+            return redemption
+        }
 
         override suspend fun getMyRewardRedemptions(eventId: String): NetworkResult<List<RewardRedemptionResponse>> {
             redemptionCalls++
             gate?.await()
-            return redemption
+            return perEventRedemption
         }
     }
+
+    /** A 404 from a backend that does not have the all-redemptions endpoint yet. */
+    private fun notFound(): HttpException =
+        HttpException(Response.error<Any>(404, "{}".toResponseBody("application/json".toMediaType())))
 
     private fun summary() = DashboardSummary(
         totalEvents = 0,
@@ -198,25 +216,25 @@ class DashboardPresenterTest {
     }
 
     @Test
-    fun theScreenPaintsBeforeTheRedemptionFanOut_andTheRewardsCellUpdatesWhenItLands() {
+    fun theScreenPaintsBeforeTheRedemptionRead_andTheRewardsCellUpdatesWhenItLands() {
         val view = RecordingView()
-        val repo = GatedRedemptionsRepo(attendedRegistration())
+        val repo = GatedRedemptionsRepo(listOf(attendedRegistration()))
         val gate = repo.gate!!
         presenterFor(view, repo).loadDashboard()
 
-        // The four screen calls answered and the skeleton is off while the per-event redemptions
-        // are still suspended.
+        // The four screen calls answered and the skeleton is off while the redemptions read is
+        // still suspended.
         assertEquals(listOf(true, false), view.loading)
-        assertNotNull("the summary is on screen before the fan-out", view.summary)
+        assertNotNull("the summary is on screen before the enrichment", view.summary)
         assertNull("unknown keeps the pass head on --", view.summary?.rewardsClaimedCount)
         assertNull(view.rewardsCount)
-        assertEquals(1, repo.redemptionCalls)
+        assertEquals(1, repo.allRedemptionCalls)
 
-        // Release the fan-out: only the rewards cell changes, and PENDING does not count.
+        // Release it: only the rewards cell changes.
         gate.complete(Unit)
 
         assertEquals(1L, view.rewardsCount)
-        assertEquals(1, repo.redemptionCalls)
+        assertEquals(1, repo.allRedemptionCalls)
         // A second summary render would reflow the other numbers; there is none.
         assertEquals(listOf(true, false), view.loading)
     }
@@ -224,19 +242,46 @@ class DashboardPresenterTest {
     @Test
     fun theRewardsCellEndsOnTheSameValueAsTheUnblockedPath() {
         val view = RecordingView()
-        val repo = GatedRedemptionsRepo(attendedRegistration(), gate = null)
+        val repo = GatedRedemptionsRepo(listOf(attendedRegistration()), gate = null)
         presenterFor(view, repo).loadDashboard()
 
         assertNull("the summary itself never carries it", view.summary?.rewardsClaimedCount)
         assertEquals(1L, view.rewardsCount)
-        assertEquals(1, repo.redemptionCalls)
+        assertEquals(1, repo.allRedemptionCalls)
+        assertEquals(0, repo.redemptionCalls)
     }
 
     @Test
-    fun aFailedFanOutKeepsTheScreen_andReportsNoError() {
+    fun oneRedemptionsReadCoversEveryCheckedInEvent() {
+        val view = RecordingView()
+        val registrations = List(3) { attendedRegistration() }
+        val repo = GatedRedemptionsRepo(
+            registrations,
+            redemption = NetworkResult.Success(
+                registrations.flatMap { registration ->
+                    listOf(
+                        redemption(registration.eventId, RedemptionStatus.REDEEMED),
+                        redemption(registration.eventId, RedemptionStatus.REDEEMED),
+                        redemption(registration.eventId, RedemptionStatus.PENDING),
+                    )
+                },
+            ),
+            gate = null,
+        )
+        presenterFor(view, repo).loadDashboard()
+
+        // Three checked-in events, one call: the per-event fan-out is gone.
+        assertEquals(1, repo.allRedemptionCalls)
+        assertEquals(0, repo.redemptionCalls)
+        // Six REDEEMED rows count; the three PENDING ones do not.
+        assertEquals(6L, view.rewardsCount)
+    }
+
+    @Test
+    fun aFailedReadKeepsTheScreen_andReportsNoError() {
         val view = RecordingView()
         val repo = GatedRedemptionsRepo(
-            attendedRegistration(),
+            listOf(attendedRegistration()),
             redemption = NetworkResult.Error("no claim data"),
             gate = null,
         )
@@ -245,7 +290,32 @@ class DashboardPresenterTest {
         assertNotNull(view.summary)
         assertNull(view.rewardsCount)
         assertNull(view.error)
+        assertEquals(1, repo.allRedemptionCalls)
+        // An ordinary failure is the answer: the old fan-out is not replayed.
+        assertEquals(0, repo.redemptionCalls)
         // Only the faked users/me leg fails; the redemptions failure adds nothing.
         assertEquals(listOf("account"), view.partialErrors)
+    }
+
+    @Test
+    fun aMissingEndpointFallsBackToThePerEventReads() {
+        val view = RecordingView()
+        val registrations = List(2) { attendedRegistration() }
+        val repo = GatedRedemptionsRepo(
+            registrations,
+            redemption = NetworkResult.Error("Not Found", notFound()),
+            perEventRedemption = NetworkResult.Success(
+                listOf(redemption(registrations.first().eventId, RedemptionStatus.REDEEMED)),
+            ),
+            gate = null,
+        )
+        presenterFor(view, repo).loadDashboard()
+
+        // The 404 is answered by one read per checked-in event, and the old count still lands.
+        assertEquals(1, repo.allRedemptionCalls)
+        assertEquals(2, repo.redemptionCalls)
+        // Each event read answers one REDEEMED row, so the count is the pre-endpoint sum.
+        assertEquals(2L, view.rewardsCount)
+        assertNull(view.error)
     }
 }

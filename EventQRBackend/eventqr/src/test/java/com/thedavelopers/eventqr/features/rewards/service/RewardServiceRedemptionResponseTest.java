@@ -1,6 +1,8 @@
 package com.thedavelopers.eventqr.features.rewards.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -91,5 +93,42 @@ class RewardServiceRedemptionResponseTest {
         assertThat(responses).singleElement()
                 .extracting(RewardRedemptionResponse::redemptionScanLogId)
                 .isEqualTo(scanLogId);
+    }
+
+    // --- findMyRedemptions: one call, all events, caller's rows only -------
+
+    @Test
+    void myRedemptionsQueriesTheCallerOnlyAndCarriesEventIdPerRow() throws Exception {
+        UUID callerId = UUID.randomUUID();
+        UUID otherAttendeeId = UUID.randomUUID();
+        UUID firstEventId = UUID.randomUUID();
+        UUID secondEventId = UUID.randomUUID();
+        when(rewardRedemptionRepository.findByAttendeeUserIdOrderByCreatedAtDescIdDesc(callerId))
+                .thenReturn(List.of(redemption(firstEventId, callerId, UUID.randomUUID()),
+                        redemption(secondEventId, callerId, null)));
+        // A different attendee's history stays out of reach even if the repository were asked for it.
+        when(rewardRedemptionRepository.findByAttendeeUserIdOrderByCreatedAtDescIdDesc(otherAttendeeId))
+                .thenReturn(List.of(redemption(firstEventId, otherAttendeeId, null)));
+
+        List<RewardRedemptionResponse> responses = service.findMyRedemptions(callerId);
+
+        verify(rewardRedemptionRepository).findByAttendeeUserIdOrderByCreatedAtDescIdDesc(callerId);
+        verify(rewardRedemptionRepository, never()).findByAttendeeUserIdOrderByCreatedAtDescIdDesc(otherAttendeeId);
+        assertThat(responses).hasSize(2)
+                .allSatisfy(row -> assertThat(row.attendeeUserId()).isEqualTo(callerId))
+                .extracting(RewardRedemptionResponse::eventId)
+                .containsExactly(firstEventId, secondEventId);
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(responses));
+        assertThat(json.get(0).get("eventId").asText()).isEqualTo(firstEventId.toString());
+        assertThat(json.get(0).get("attendeeUserId").asText()).isEqualTo(callerId.toString());
+    }
+
+    @Test
+    void myRedemptionsWithoutAnyRedemptionIsAnEmptyList() {
+        UUID callerId = UUID.randomUUID();
+        when(rewardRedemptionRepository.findByAttendeeUserIdOrderByCreatedAtDescIdDesc(callerId)).thenReturn(List.of());
+
+        assertThat(service.findMyRedemptions(callerId)).isEmpty();
     }
 }

@@ -119,10 +119,18 @@ open class OrganizerRepository(
      * A mutation that can change the event rows or their embedded counts must not leave either
      * snapshot behind: the user's own edit is never masked by an answer taken before it.
      */
-    private suspend fun <T> NetworkResult<T>.invalidateEventsAfterSuccess(): NetworkResult<T> = also {
+    private suspend fun <T> NetworkResult<T>.invalidateEventsAfterSuccess(): NetworkResult<T> =
+        invalidateAfterSuccess()
+
+    /**
+     * The same rule for a sub-screen answer: [keys] are the per-event snapshot keys the mutation can
+     * change (staff, scan purposes), dropped together with the event list.
+     */
+    private suspend fun <T> NetworkResult<T>.invalidateAfterSuccess(vararg keys: String): NetworkResult<T> = also {
         if (it is NetworkResult.Success) {
             invalidateEvents()
             lastKnown.invalidate(OrganizerSnapshots.EVENTS)
+            keys.forEach { key -> lastKnown.invalidate(key) }
         }
     }
 
@@ -157,33 +165,51 @@ open class OrganizerRepository(
     }
 
     suspend fun loadAttendeesForMvp(eventId: String): OrganizerMvpLoad<List<OrganizerMvpAttendee>> {
+        // The session the answer is fetched for, read before the request (see LastKnownCache.currentOwner).
+        val owner = lastKnown.currentOwner()
         return when (val result = fetchOrganizerAttendees(eventId)) {
-            is NetworkResult.Success -> OrganizerMvpLoad(result.data.map { it.toMvpAttendee(context) }, OrganizerMvpDataSource.BACKEND)
+            is NetworkResult.Success -> {
+                val mapped = result.data.map { it.toMvpAttendee(context) }
+                lastKnown.write(OrganizerSnapshots.attendees(eventId), mapped, owner)
+                OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
+            }
             is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
             NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
         }
     }
 
     suspend fun loadTransactionsForMvp(eventId: String, eventTitle: String): OrganizerMvpLoad<List<OrganizerMvpTransaction>> {
+        val owner = lastKnown.currentOwner()
         return when (val result = fetchOrganizerTransactions(eventId)) {
-            is NetworkResult.Success -> OrganizerMvpLoad(result.data.map { it.toMvpTransaction(context, eventTitle) }, OrganizerMvpDataSource.BACKEND)
+            is NetworkResult.Success -> {
+                val mapped = result.data.map { it.toMvpTransaction(context, eventTitle) }
+                lastKnown.write(OrganizerSnapshots.logs(eventId), mapped, owner)
+                OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
+            }
             is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
             NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
         }
     }
 
     suspend fun loadScanPurposesForMvp(eventId: String): OrganizerMvpLoad<List<OrganizerMvpScanPurpose>> {
+        val owner = lastKnown.currentOwner()
         return when (val result = fetchOrganizerScanPurposes(eventId)) {
-            is NetworkResult.Success -> OrganizerMvpLoad(result.data.map { it.toMvpScanPurpose(context) }, OrganizerMvpDataSource.BACKEND)
+            is NetworkResult.Success -> {
+                val mapped = result.data.map { it.toMvpScanPurpose(context) }
+                lastKnown.write(OrganizerSnapshots.scanPurposes(eventId), mapped, owner)
+                OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
+            }
             is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
             NetworkResult.Loading -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, null)
         }
     }
 
     suspend fun loadStaffForMvp(event: OrganizerMvpEvent): OrganizerMvpLoad<List<OrganizerMvpStaff>> {
+        val owner = lastKnown.currentOwner()
         return when (val result = fetchOrganizerStaff(event.id)) {
             is NetworkResult.Success -> {
                 val mapped = result.data.map { it.toMvpStaff(context, event.title) }
+                lastKnown.write(OrganizerSnapshots.staff(event.id), mapped, owner)
                 OrganizerMvpLoad(mapped, OrganizerMvpDataSource.BACKEND)
             }
             is NetworkResult.Error -> OrganizerMvpLoad(emptyList(), OrganizerMvpDataSource.ERROR, result.message)
@@ -247,13 +273,16 @@ open class OrganizerRepository(
 
     suspend fun enableScanPurposeForMvp(eventId: String, purposeId: String, enabled: Boolean) =
         (if (enabled) safeApiCall { apiService.enableOrganizerScanPurpose(eventId, purposeId) }
-        else safeApiCall { apiService.disableOrganizerScanPurpose(eventId, purposeId) }).invalidateEventsAfterSuccess()
+        else safeApiCall { apiService.disableOrganizerScanPurpose(eventId, purposeId) })
+            .invalidateAfterSuccess(OrganizerSnapshots.scanPurposes(eventId))
 
     suspend fun updateScanPurposeTrackingOnlyForMvp(eventId: String, purposeId: String, trackingOnly: Boolean) =
-        safeApiCall { apiService.updateOrganizerScanPurposeTrackingOnly(eventId, purposeId, trackingOnly) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.updateOrganizerScanPurposeTrackingOnly(eventId, purposeId, trackingOnly) }
+            .invalidateAfterSuccess(OrganizerSnapshots.scanPurposes(eventId))
 
     suspend fun deleteScanPurposeForMvp(eventId: String, purposeId: String) =
-        safeApiCall { apiService.deleteOrganizerScanPurpose(eventId, purposeId) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.deleteOrganizerScanPurpose(eventId, purposeId) }
+            .invalidateAfterSuccess(OrganizerSnapshots.scanPurposes(eventId))
 
     suspend fun getEvents(): NetworkResult<List<EventResponse>> =
         when (val result = safeApiCall { apiService.getEvents() }) {
@@ -279,21 +308,26 @@ open class OrganizerRepository(
         apiService.uploadEventLogo(part)
     }
     suspend fun getStoredFile(fileId: String) = safeApiCall { apiService.getStoredFile(fileId) }
-    suspend fun fetchOrganizerAttendees(eventId: String) = safeApiCall { apiService.getOrganizerAttendees(eventId) }
-    suspend fun fetchOrganizerTransactions(eventId: String) = safeApiCall { apiService.getOrganizerTransactions(eventId) }
-    suspend fun fetchOrganizerStaff(eventId: String) = safeApiCall { apiService.getOrganizerStaff(eventId) }
+    open suspend fun fetchOrganizerAttendees(eventId: String) = safeApiCall { apiService.getOrganizerAttendees(eventId) }
+    open suspend fun fetchOrganizerTransactions(eventId: String) = safeApiCall { apiService.getOrganizerTransactions(eventId) }
+    open suspend fun fetchOrganizerStaff(eventId: String) = safeApiCall { apiService.getOrganizerStaff(eventId) }
     suspend fun addOrganizerStaff(eventId: String, request: StaffAssignmentRequestDto) =
-        safeApiCall { apiService.addOrganizerStaff(eventId, request) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.addOrganizerStaff(eventId, request) }
+            .invalidateAfterSuccess(OrganizerSnapshots.staff(eventId))
     suspend fun updateOrganizerStaff(eventId: String, assignmentId: String, request: StaffAssignmentUpdateRequestDto) =
-        safeApiCall { apiService.updateOrganizerStaff(eventId, assignmentId, request) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.updateOrganizerStaff(eventId, assignmentId, request) }
+            .invalidateAfterSuccess(OrganizerSnapshots.staff(eventId))
     suspend fun removeOrganizerStaff(eventId: String, assignmentId: String) =
-        safeApiCall { apiService.removeOrganizerStaff(eventId, assignmentId) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.removeOrganizerStaff(eventId, assignmentId) }
+            .invalidateAfterSuccess(OrganizerSnapshots.staff(eventId))
     suspend fun searchOrganizerUsers(query: String) = safeApiCall { apiService.searchOrganizerUsers(query) }
-    suspend fun fetchOrganizerScanPurposes(eventId: String) = safeApiCall { apiService.getOrganizerScanPurposes(eventId) }
+    open suspend fun fetchOrganizerScanPurposes(eventId: String) = safeApiCall { apiService.getOrganizerScanPurposes(eventId) }
     suspend fun createOrganizerScanPurpose(eventId: String, request: OrganizerScanPurposeRequestDto) =
-        safeApiCall { apiService.createOrganizerScanPurpose(eventId, request) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.createOrganizerScanPurpose(eventId, request) }
+            .invalidateAfterSuccess(OrganizerSnapshots.scanPurposes(eventId))
     suspend fun updateOrganizerScanPurpose(eventId: String, purposeId: String, request: OrganizerScanPurposeRequestDto) =
-        safeApiCall { apiService.updateOrganizerScanPurpose(eventId, purposeId, request) }.invalidateEventsAfterSuccess()
+        safeApiCall { apiService.updateOrganizerScanPurpose(eventId, purposeId, request) }
+            .invalidateAfterSuccess(OrganizerSnapshots.scanPurposes(eventId))
 
     suspend fun createEvent(request: EventRequest) =
         safeApiCall { apiService.createEvent(request) }.invalidateEventsAfterSuccess()

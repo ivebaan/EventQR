@@ -64,7 +64,7 @@ class ManageUsersActivityTest {
     private class CountingManageUsersActivity : ManageUsersActivity() {
         var reloads = 0
 
-        override fun loadAssigned() {
+        override fun loadAssigned(forceNetwork: Boolean) {
             reloads++
         }
     }

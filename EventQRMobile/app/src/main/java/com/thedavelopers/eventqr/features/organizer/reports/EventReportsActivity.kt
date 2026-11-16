@@ -25,6 +25,8 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.snackbar.Snackbar
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.features.organizer.*
 import com.thedavelopers.eventqr.features.reports.model.dto.EventReportCatalogItem
 import com.thedavelopers.eventqr.features.reports.model.dto.EventReportDto
@@ -37,6 +39,7 @@ import com.thedavelopers.eventqr.ui.components.EventPickerOption
 import com.thedavelopers.eventqr.ui.components.ListRowBinder
 import com.thedavelopers.eventqr.ui.components.asButtonRole
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
@@ -53,6 +56,13 @@ open class EventReportsActivity : AppCompatActivity() {
     internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
         repositoryFactory = factory
     }
+
+    /** Tests set this before the first load to point the snapshot reads at their own directory. */
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
 
     private lateinit var repository: OrganizerRepository
     @VisibleForTesting
@@ -148,13 +158,38 @@ open class EventReportsActivity : AppCompatActivity() {
         summaryContainer.addView(skeletonLoading)
 
         summaryJob = lifecycleScope.launch {
-            when (val result = reportsRepository.fetchSummary(selectedEvent.id)) {
+            var freshLanded = false
+            val eventId = selectedEvent.id
+            // The session the answer is fetched for, read before the request (LastKnownCache.currentOwner).
+            val owner = cache.currentOwner()
+            // The persisted totals paint as soon as the read answers. The read runs beside the request,
+            // never before it: an answer that is already in hand must not wait on the disk.
+            val snapshot = async {
+                cache.read<EventReportSummaryDto>(
+                    OrganizerSnapshots.reports(eventId),
+                    OrganizerSnapshots.REPORTS_TYPE,
+                    OrganizerSnapshots.MAX_AGE_MS,
+                )?.data
+            }
+            launch {
+                val cached = snapshot.await() ?: return@launch
+                // The fresh answer always wins: a paint that lands after it would resurrect old totals.
+                if (freshLanded) return@launch
+                summary = cached
+                renderList(summaryContainer)
+            }
+            when (val result = reportsRepository.fetchSummary(eventId)) {
                 is NetworkResult.Success -> {
+                    freshLanded = true
                     summary = result.data
                     renderList(summaryContainer)
+                    // Persist after the paint: the write is a file round trip, and the totals must not wait on it.
+                    cache.write(OrganizerSnapshots.reports(eventId), result.data, owner)
                 }
 
                 is NetworkResult.Error -> {
+                    freshLanded = true
+                    // Painted totals (if any) stay: only the strip reports the failure.
                     renderList(summaryContainer)
                     // Totals failed but the catalogue still works: report above the metric rows with Retry.
                     val sentence = result.message.takeIf { it.isNotBlank() }

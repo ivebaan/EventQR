@@ -1,6 +1,7 @@
 package com.thedavelopers.eventqr.features.organizer.staff
 
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -16,6 +17,8 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.snackbar.Snackbar
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.util.ScreenInsets
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_ID
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpDataSource
@@ -34,6 +37,20 @@ import com.thedavelopers.eventqr.ui.icons.AppIcons
 import kotlinx.coroutines.launch
 
 open class ManageUsersActivity : AppCompatActivity() {
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: OrganizerRepository
     @VisibleForTesting
     internal lateinit var selectedEvent: OrganizerMvpEvent
@@ -54,7 +71,7 @@ open class ManageUsersActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
 
         lifecycleScope.launch {
             val eventId = intentEventId() ?: return@launch showMissingEventScreen(getString(R.string.manage_users_title))
@@ -96,7 +113,7 @@ open class ManageUsersActivity : AppCompatActivity() {
             errorStrip.visibility = View.GONE
             loadAssigned()
         }
-        swipeRefresh.setOnRefreshListener { loadAssigned() }
+        swipeRefresh.setOnRefreshListener { loadAssigned(forceNetwork = true) }
     }
 
     private fun setupList() {
@@ -131,8 +148,24 @@ open class ManageUsersActivity : AppCompatActivity() {
         searchUserLauncher.launch(intent)
     }
 
-    internal open fun loadAssigned() {
-        lifecycleScope.launch { applyStaffLoad(repository.loadStaffForMvp(selectedEvent)) }
+    /** Test handle: a pull (forceNetwork) bypasses the persisted roster. */
+    @VisibleForTesting
+    internal open fun loadAssigned(forceNetwork: Boolean = false) {
+        lifecycleScope.launch {
+            // The persisted roster paints first: a cold open shows the rows with no spinner.
+            if (!forceNetwork) paintSnapshot()
+            applyStaffLoad(repository.loadStaffForMvp(selectedEvent))
+        }
+    }
+
+    /** Paints `organizer/staff/{eventId}` so the roster is readable before the network answers. */
+    private suspend fun paintSnapshot() {
+        val snapshot = cache.read<List<OrganizerMvpStaff>>(
+            OrganizerSnapshots.staff(selectedEvent.id),
+            OrganizerSnapshots.STAFF_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return
+        applyStaffLoad(OrganizerMvpLoad(snapshot, OrganizerMvpDataSource.BACKEND))
     }
 
     @VisibleForTesting

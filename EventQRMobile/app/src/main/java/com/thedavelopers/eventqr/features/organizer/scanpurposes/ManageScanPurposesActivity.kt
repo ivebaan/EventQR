@@ -4,6 +4,7 @@ import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.dimenPx
 import com.thedavelopers.eventqr.features.organizer.styledText
 import android.app.AlertDialog
+import android.content.Context
 import android.os.Bundle
 import android.text.InputType
 import android.util.Log
@@ -18,11 +19,14 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.ScanPurposeCode
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.ui.theme.color
 import com.thedavelopers.eventqr.features.organizer.*
@@ -37,6 +41,20 @@ import java.util.UUID
 open class ManageScanPurposesActivity : AppCompatActivity() {
     private val TAG = "ManageScanPurposesActivity"
     private val persistenceTag = "ScanPurposePersistence"
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: OrganizerRepository
     private lateinit var selectedEvent: OrganizerMvpEvent
     private lateinit var purposeHost: LinearLayout
@@ -58,7 +76,7 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
         val eventId = intentEventId() ?: return showMissingEventScreen(getString(R.string.manage_scan_purposes_title))
         showEventsLoadingScreen(getString(R.string.manage_scan_purposes_title))
         lifecycleScope.launch {
@@ -83,7 +101,7 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
                 onRefresh = {
                     // Pull-to-refresh bypasses the shared snapshot: the user asked for fresh rows.
                     repository.invalidateEvents()
-                    loadPurposes(showInitialLoading = false)
+                    loadPurposes(showInitialLoading = false, forceNetwork = true)
                 }
 
             )
@@ -126,24 +144,42 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
         (parent as? ScrollView)?.scrollTo(0, 0)
     }
 
-    private fun loadPurposes(showInitialLoading: Boolean = true) {
+    /** Test handle: a pull (forceNetwork) bypasses the persisted snapshot. */
+    @VisibleForTesting
+    internal fun loadPurposes(showInitialLoading: Boolean = true, forceNetwork: Boolean = false) {
         refreshCount += 1
         val requestSerial = ++loadRequestSerial
-        if (showInitialLoading && !swipeRefresh.isRefreshing) {
-            statusLine.visibility = View.GONE
-            purposeHost.removeAllViews()
-            purposeHost.addView(loadingState(getString(R.string.manage_scan_purposes_loading)))
-        }
         lifecycleScope.launch {
-            val source = repository.loadScanPurposesForMvp(selectedEvent.id)
+            val eventId = selectedEvent.id
+            // The persisted list paints first: a cold open shows the rows with no loading card.
+            val painted = !forceNetwork && paintSnapshot(eventId)
+            if (!painted && showInitialLoading && !swipeRefresh.isRefreshing) {
+                statusLine.visibility = View.GONE
+                purposeHost.removeAllViews()
+                purposeHost.addView(loadingState(getString(R.string.manage_scan_purposes_loading)))
+            }
+            val source = repository.loadScanPurposesForMvp(eventId)
+            if (requestSerial != loadRequestSerial) {
+                swipeRefresh.isRefreshing = false
+                return@launch
+            }
+            swipeRefresh.isRefreshing = false
+            if (source.source == OrganizerMvpDataSource.ERROR) {
+                if (painted) {
+                    // A failed refresh keeps the rows already on screen; only the line reports.
+                    source.message?.let { showStatus(it) }
+                    return@launch
+                }
+                // The failure owns the slot: an empty state would claim "no purposes" for a list
+                // that was never read. Show the error line only.
+                purposeHost.removeAllViews()
+                source.message?.let { showStatus(it) }
+                return@launch
+            }
             val persistedPurposes = source.data.filter { !it.id.isNullOrBlank() }
             val droppedWithoutId = source.data.size - persistedPurposes.size
             if (!isFinishing && !isDestroyed && requestSerial == loadRequestSerial) {
                 scanPurposes = persistedPurposes.toList()
-            }
-            if (requestSerial != loadRequestSerial) {
-                swipeRefresh.isRefreshing = false
-                return@launch
             }
             Log.d(
                 TAG,
@@ -159,19 +195,27 @@ open class ManageScanPurposesActivity : AppCompatActivity() {
                     "eventId=${selectedEvent.id} ignoredCount=$droppedWithoutId reason=missingPurposeIdOnLoad"
                 )
             }
-            swipeRefresh.isRefreshing = false
-            if (source.source == OrganizerMvpDataSource.ERROR) {
-                // The failure owns the slot: an empty state would claim "no purposes" for a list
-                // that was never read. Show the error line only.
-                purposeHost.removeAllViews()
-                source.message?.let { showStatus(it) }
-                return@launch
-            }
             renderPurposes(scanPurposes)
             source.message?.let {
                 showStatus(it)
             }
         }
+    }
+
+    /**
+     * Paints `organizer/scan-purposes/{eventId}` so the list is readable before the network, applying
+     * the same "a purpose without an id cannot be acted on" filter as the loaded list.
+     */
+    private suspend fun paintSnapshot(eventId: String): Boolean {
+        val snapshot = cache.read<List<OrganizerMvpScanPurpose>>(
+            OrganizerSnapshots.scanPurposes(eventId),
+            OrganizerSnapshots.SCAN_PURPOSES_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return false
+        val persistedPurposes = snapshot.filter { !it.id.isNullOrBlank() }
+        scanPurposes = persistedPurposes
+        renderPurposes(persistedPurposes)
+        return true
     }
 
     private fun renderPurposes(purposes: List<OrganizerMvpScanPurpose>) {

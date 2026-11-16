@@ -84,6 +84,10 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
     @VisibleForTesting
     internal var sessionRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshIfStale(it) }
 
+    /** The pull path: a forced rotation, so a role change appears on pull. A failure is ignored. */
+    @VisibleForTesting
+    internal var sessionForcedRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshNow(it) }
+
     @VisibleForTesting
     internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
         repositoryFactory = factory
@@ -141,6 +145,9 @@ open class OrganizerDashboardActivity : AppCompatActivity() {
             // Pull-to-refresh bypasses both snapshots: the user asked for fresh rows.
             repository.invalidateEvents()
             loadDashboard(forceNetwork = true)
+            // Alongside the reload, never before it: a pull also re-issues the access token so a
+            // role change appears now, and a failed rotation cannot hold the reload back.
+            lifecycleScope.launch { runCatching { sessionForcedRefresh(this@OrganizerDashboardActivity) } }
         }
 
         setupNavigation()

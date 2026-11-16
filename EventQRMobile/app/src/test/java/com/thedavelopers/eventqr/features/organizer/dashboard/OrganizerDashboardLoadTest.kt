@@ -174,6 +174,64 @@ class OrganizerDashboardLoadTest {
         assertEquals("Fresh", host.findViewById<TextView>(R.id.listRowTitle).text.toString())
     }
 
+    private fun pull(activity: OrganizerDashboardActivity) {
+        val refresh = activity.findViewById<androidx.swiperefreshlayout.widget.SwipeRefreshLayout>(
+            R.id.swipeRefreshDashboard,
+        )
+        refresh.isRefreshing = true
+        val listener = androidx.swiperefreshlayout.widget.SwipeRefreshLayout::class.java
+            .getDeclaredField("mListener")
+            .apply { isAccessible = true }.get(refresh) as androidx.swiperefreshlayout.widget.SwipeRefreshLayout.OnRefreshListener
+        listener.onRefresh()
+    }
+
+    @Test
+    fun aPullForcesTheSessionRefreshOnce_andStillReloadsWhenItFails() {
+        var forced = 0
+        var stale = 0
+        val repository = CachedRepository(ApplicationProvider.getApplicationContext(), OrganizerEventsCache())
+        val controller = Robolectric.buildActivity(OrganizerDashboardActivity::class.java)
+        val activity = controller.get().apply {
+            installRepositoryFactory { repository }
+            sessionForcedRefresh = { forced++; throw IllegalStateException("offline") }
+            sessionRefresh = { stale++ }
+        }
+        controller.create()
+        awaitUntil { repository.fetches == 1 }
+        assertEquals("create refreshes on the throttled path", 1, stale)
+        assertEquals(0, forced)
+
+        pull(activity)
+        awaitUntil { repository.fetches == 2 }
+        settle()
+
+        assertEquals("one forced rotation per pull", 1, forced)
+        assertEquals("the rows reload whatever the refresh did", 2, repository.fetches)
+        assertEquals("a pull is never the throttled path", 1, stale)
+    }
+
+    @Test
+    fun aResumeStaysOnTheThrottledRefresh_andNeverForces() {
+        var forced = 0
+        var stale = 0
+        val repository = CachedRepository(ApplicationProvider.getApplicationContext(), OrganizerEventsCache())
+        val controller = Robolectric.buildActivity(OrganizerDashboardActivity::class.java)
+        controller.get().apply {
+            installRepositoryFactory { repository }
+            sessionForcedRefresh = { forced++ }
+            sessionRefresh = { stale++ }
+        }
+        controller.create().start().resume()
+        settle()
+        assertEquals("onCreate refreshes on resume's throttled path", 1, stale)
+
+        controller.pause().resume()
+        settle()
+
+        assertEquals(2, stale)
+        assertEquals("a resume must not spend a refresh token", 0, forced)
+    }
+
     private fun upcoming(title: String): OrganizerMvpLoad<List<OrganizerMvpEvent>> {
         val now = java.time.Instant.now()
         return OrganizerMvpLoad(

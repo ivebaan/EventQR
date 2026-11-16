@@ -20,6 +20,8 @@ import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResp
 import com.thedavelopers.eventqr.features.transactions.TransactionHistoryRow
 import com.thedavelopers.eventqr.features.transactions.model.dto.TransactionResponse
 import kotlinx.coroutines.CompletableDeferred
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +29,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import retrofit2.HttpException
+import retrofit2.Response
 import java.time.Instant
 import java.util.UUID
 
@@ -213,7 +217,7 @@ class TransactionHistoryPresenterLoadTest {
             points[eventA.toString()] = NetworkResult.Success(
                 listOf(point(eventA, points = -40, reason = "Reward redemption")),
             )
-            claims[eventA.toString()] = NetworkResult.Error("offline")
+            allRedemptions = NetworkResult.Error("offline")
         }
         val view = RecordingView()
 
@@ -223,6 +227,72 @@ class TransactionHistoryPresenterLoadTest {
         // The link is unknown, so the ledger row is kept rather than guessed away.
         assertEquals(1, view.rendered.last().count { it is TransactionHistoryRow.Point })
         assertEquals(emptyList<String>(), view.errors)
+    }
+
+    @Test
+    fun oneAllRedemptionsReadReplacesThePerEventClaimReads() {
+        val repo = redemptionScansRepo(missingEndpoint = false)
+        val view = RecordingView()
+
+        presenter(view, repo).load()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // Two events hold approved redemption scans, but the claims come back in one read.
+        assertEquals(1, repo.allRedemptionReads)
+        assertEquals(0, repo.claimReads)
+        // The per-event point reads are unchanged.
+        assertEquals(2, repo.pointReads.size)
+        // Both duplicate ledger rows are dropped by their scan-backed redemption, as before.
+        assertEquals(4, view.rendered.single().size)
+        assertEquals(0, view.rendered.single().count { it is TransactionHistoryRow.Point })
+        assertEquals(emptyList<String>(), view.errors)
+    }
+
+    @Test
+    fun aMissingEndpointFallsBackToThePerEventClaimReads_andMergesTheSameRows() {
+        val repo = redemptionScansRepo(missingEndpoint = true)
+        val view = RecordingView()
+
+        presenter(view, repo).load()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // One 404, then the old one-read-per-event fan-out.
+        assertEquals(1, repo.allRedemptionReads)
+        assertEquals(2, repo.claimReads)
+        // The merged history is the one the pre-endpoint app produced.
+        assertEquals(4, view.rendered.single().size)
+        assertEquals(0, view.rendered.single().count { it is TransactionHistoryRow.Point })
+        assertEquals(emptyList<String>(), view.errors)
+    }
+
+    /** Two events, each with an approved redemption scan, its outcome row and a duplicate ledger row. */
+    private fun redemptionScansRepo(missingEndpoint: Boolean): FakeRepo {
+        val redemptionA = UUID.randomUUID()
+        val redemptionB = UUID.randomUUID()
+        return FakeRepo().apply {
+            registrations = NetworkResult.Success(listOf(registration(eventA), registration(eventB)))
+            transactions = NetworkResult.Success(
+                listOf(
+                    scan(eventA, type = TransactionType.REWARD_REDEMPTION_SCAN, points = 0),
+                    scan(eventA, type = TransactionType.REWARD_REDEMPTION, points = -40),
+                    scan(eventB, type = TransactionType.REWARD_REDEMPTION_SCAN, points = 0),
+                    scan(eventB, type = TransactionType.REWARD_REDEMPTION, points = -40),
+                ),
+            )
+            points[eventA.toString()] = NetworkResult.Success(
+                listOf(point(eventA, source = redemptionA, points = -40, reason = "Reward redemption")),
+            )
+            points[eventB.toString()] = NetworkResult.Success(
+                listOf(point(eventB, source = redemptionB, points = -40, reason = "Reward redemption")),
+            )
+            claims[eventA.toString()] = NetworkResult.Success(
+                listOf(redemption(eventA, redemptionA, scanLogId = UUID.randomUUID())),
+            )
+            claims[eventB.toString()] = NetworkResult.Success(
+                listOf(redemption(eventB, redemptionB, scanLogId = UUID.randomUUID())),
+            )
+            if (missingEndpoint) allRedemptions = NetworkResult.Error("Not Found", notFound())
+        }
     }
 
     @Test
@@ -332,9 +402,14 @@ class TransactionHistoryPresenterLoadTest {
         var registrations: NetworkResult<List<RegistrationResponse>> = NetworkResult.Success(emptyList())
         var transactions: NetworkResult<List<TransactionResponse>> = NetworkResult.Success(emptyList())
         val points = mutableMapOf<String, NetworkResult<List<PointTransactionResponse>>>()
+        /** Per-event claimed rewards; only the 404 fallback may read them. */
         val claims = mutableMapOf<String, NetworkResult<List<RewardRedemptionResponse>>>()
+        /** The one-call answer; null derives it from [claims] so a test can set either. */
+        var allRedemptions: NetworkResult<List<RewardRedemptionResponse>>? = null
         var registrationReads = 0
         val pointReads = mutableMapOf<String, Int>()
+        var allRedemptionReads = 0
+        var claimReads = 0
         /** Holds every per-event read open, so a test decides when the enrichment lands. */
         var gate: CompletableDeferred<Unit>? = null
 
@@ -351,11 +426,23 @@ class TransactionHistoryPresenterLoadTest {
             return points[eventId] ?: NetworkResult.Success(emptyList())
         }
 
+        override suspend fun getMyAllRedemptions(): NetworkResult<List<RewardRedemptionResponse>> {
+            allRedemptionReads++
+            gate?.await()
+            return allRedemptions ?: NetworkResult.Success(
+                claims.values.flatMap { (it as? NetworkResult.Success)?.data.orEmpty() },
+            )
+        }
+
         override suspend fun getMyRewardRedemptions(eventId: String): NetworkResult<List<RewardRedemptionResponse>> {
+            claimReads++
             gate?.await()
             return claims[eventId] ?: NetworkResult.Success(emptyList())
         }
     }
+
+    private fun notFound(): HttpException =
+        HttpException(Response.error<Any>(404, "{}".toResponseBody("application/json".toMediaType())))
 
     private class RecordingView : TransactionHistoryContract.View {
         val rendered = mutableListOf<List<TransactionHistoryRow>>()

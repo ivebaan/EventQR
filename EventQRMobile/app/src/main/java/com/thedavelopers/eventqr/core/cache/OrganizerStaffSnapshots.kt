@@ -1,7 +1,14 @@
 package com.thedavelopers.eventqr.core.cache
 
 import com.google.gson.reflect.TypeToken
+import com.thedavelopers.eventqr.features.organizer.OrganizerMvpAttendee
 import com.thedavelopers.eventqr.features.organizer.OrganizerMvpEvent
+import com.thedavelopers.eventqr.features.organizer.OrganizerMvpScanPurpose
+import com.thedavelopers.eventqr.features.organizer.OrganizerMvpStaff
+import com.thedavelopers.eventqr.features.organizer.OrganizerMvpTransaction
+import com.thedavelopers.eventqr.features.reports.model.dto.EventReportSummaryDto
+import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResponse
+import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
 import com.thedavelopers.eventqr.features.staff.model.dto.StaffAssignedEventResponse
 import com.thedavelopers.eventqr.features.staff.model.dto.StaffTodaySummary
 import com.thedavelopers.eventqr.features.transactions.model.dto.TransactionResponse
@@ -28,7 +35,32 @@ object OrganizerSnapshots {
 
     const val EVENTS = "organizer/events"
 
+    /**
+     * The per-event sub-screen answers. Every key ends in the event id, so a snapshot painted for one
+     * event can never be served for another (the cache path already carries the user id).
+     */
+    fun attendees(eventId: String) = "organizer/attendees/$eventId"
+
+    /** `GET organizer/events/{id}/reports/summary`: the on-open totals, never generated report rows. */
+    fun reports(eventId: String) = "organizer/reports/$eventId"
+
+    fun rewards(eventId: String) = "organizer/rewards/$eventId"
+    fun claimedRewards(eventId: String) = "organizer/rewards/$eventId/claimed"
+    fun rewardSettings(eventId: String) = "organizer/rewards/$eventId/settings"
+
+    fun scanPurposes(eventId: String) = "organizer/scan-purposes/$eventId"
+    fun logs(eventId: String) = "organizer/logs/$eventId"
+    fun staff(eventId: String) = "organizer/staff/$eventId"
+
     val EVENTS_TYPE: Type = listType(OrganizerMvpEvent::class.java)
+    val ATTENDEES_TYPE: Type = listType(OrganizerMvpAttendee::class.java)
+    val REPORTS_TYPE: Type = EventReportSummaryDto::class.java
+    val REWARDS_TYPE: Type = listType(RewardResponse::class.java)
+    val CLAIMED_REWARDS_TYPE: Type = listType(RewardRedemptionResponse::class.java)
+    val REWARD_SETTINGS_TYPE: Type = Boolean::class.java
+    val SCAN_PURPOSES_TYPE: Type = listType(OrganizerMvpScanPurpose::class.java)
+    val LOGS_TYPE: Type = listType(OrganizerMvpTransaction::class.java)
+    val STAFF_TYPE: Type = listType(OrganizerMvpStaff::class.java)
 
     private fun listType(element: Class<*>): Type = TypeToken.getParameterized(List::class.java, element).type
 }

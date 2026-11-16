@@ -31,6 +31,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.lifecycle.lifecycleScope
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.features.organizer.tintBlock
 import com.thedavelopers.eventqr.features.organizer.tintBlockArgb
 import com.thedavelopers.eventqr.core.api.ApiConfig
@@ -71,6 +73,7 @@ import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 import retrofit2.Retrofit
@@ -83,6 +86,14 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 open class ManageRewardsActivity : AppCompatActivity() {
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the event-list repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
     private lateinit var repository: OrganizerRepository
     @VisibleForTesting
     internal lateinit var selectedEvent: OrganizerMvpEvent
@@ -99,6 +110,13 @@ open class ManageRewardsActivity : AppCompatActivity() {
     @VisibleForTesting
     internal var rewardsServiceOverride: OrganizerRewardsService? = null
     private val rewardsService by lazy { rewardsServiceOverride ?: OrganizerRewardsApiProvider.get(this) }
+
+    /** Tests set this before the first load to point the snapshot reads at their own directory. */
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private var rewardDialog: AlertDialog? = null
     private var rewards: List<RewardResponse> = emptyList()
     private var redemptions: List<RewardRedemptionResponse> = emptyList()
@@ -108,7 +126,7 @@ open class ManageRewardsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
 
         setContentView(R.layout.activity_manage_rewards)
         applyEventQrSystemBarAppearance(lightStatusBars = false)
@@ -135,7 +153,7 @@ open class ManageRewardsActivity : AppCompatActivity() {
         refreshLayout.setOnRefreshListener {
             // Pull-to-refresh bypasses the shared snapshot: the user asked for fresh rows.
             repository.invalidateEvents()
-            if (::selectedEvent.isInitialized) loadRewards(showInitialLoading = false) else loadEvents()
+            if (::selectedEvent.isInitialized) loadRewards(showInitialLoading = false, forceNetwork = true) else loadEvents()
         }
         // Nothing to refresh until an event is resolved; re-enabled below once the event list loads.
         refreshLayout.isEnabled = false
@@ -257,24 +275,40 @@ open class ManageRewardsActivity : AppCompatActivity() {
     }
 
     @VisibleForTesting
-    internal fun loadRewards(showInitialLoading: Boolean = true) {
+    internal fun loadRewards(showInitialLoading: Boolean = true, forceNetwork: Boolean = false) {
         // A refresh can arrive before the event list has resolved an event; there is nothing to load yet.
         if (!::selectedEvent.isInitialized) {
             refreshLayout.isRefreshing = false
             return
         }
-        if (showInitialLoading && !refreshLayout.isRefreshing) {
-            statusLine.visibility = View.GONE
-            rewardHost.removeAllViews()
-            addRewardChip.visibility = View.GONE
-            rewardHost.addView(styledText(getString(R.string.manage_rewards_loading), R.dimen.type_body_medium, false, orgColors.muted).apply {
-                gravity = Gravity.CENTER
-                setPadding(0, dimenPx(R.dimen.space_xl), 0, dimenPx(R.dimen.space_xl))
-            })
-        }
-
         val eventId = selectedEvent.id
+        // The session the answers are fetched for, read before the requests (LastKnownCache.currentOwner).
+        val owner = cache.currentOwner()
         lifecycleScope.launch {
+            var painted = false
+            var freshLanded = false
+            // The persisted rows paint beside the request, never before it: an answer already in hand
+            // must not wait on the disk. A pull (forceNetwork) does not read them at all.
+            val snapshot = if (forceNetwork) null else async { readSnapshot(eventId) }
+            if (snapshot != null) {
+                launch {
+                    val cached = snapshot.await() ?: return@launch
+                    // The fresh answer always wins: a paint that lands after it would resurrect old rows.
+                    if (freshLanded) return@launch
+                    applySnapshot(cached)
+                    painted = true
+                }
+            }
+            if (showInitialLoading && !refreshLayout.isRefreshing) {
+                statusLine.visibility = View.GONE
+                rewardHost.removeAllViews()
+                addRewardChip.visibility = View.GONE
+                rewardHost.addView(styledText(getString(R.string.manage_rewards_loading), R.dimen.type_body_medium, false, orgColors.muted).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(0, dimenPx(R.dimen.space_xl), 0, dimenPx(R.dimen.space_xl))
+                })
+            }
+
             try {
                 val rewardsResponse = rewardsService.getRewards(eventId)
                 val redemptionsResponse = rewardsService.getClaimedRewards(eventId)
@@ -287,16 +321,67 @@ open class ManageRewardsActivity : AppCompatActivity() {
                 }
                 rewards = rewardsResponse.data.orEmpty().sortedBy { it.name.lowercase() }
                 redemptions = redemptionsResponse.data.orEmpty()
+                freshLanded = true
                 refreshLayout.isRefreshing = false
                 renderRewards()
+                // Persist after the paint: the write is a file round trip, and the list must not wait on it.
+                cache.write(OrganizerSnapshots.rewards(eventId), rewards, owner)
+                cache.write(OrganizerSnapshots.claimedRewards(eventId), redemptions, owner)
             } catch (error: Exception) {
                 if (selectedEvent.id != eventId) return@launch
+                freshLanded = true
                 refreshLayout.isRefreshing = false
+                // A failed refresh keeps the rows already on screen; the strip reports, the list stays.
+                if (painted) {
+                    showStatus(error.message ?: getString(R.string.manage_rewards_load_failed))
+                    return@launch
+                }
                 rewardHost.removeAllViews()
                 addRewardChip.visibility = View.GONE
                 rewardHost.addView(errorState(error.message ?: getString(R.string.manage_rewards_load_failed)) { loadRewards() })
             }
         }
+    }
+
+    /** The three persisted reward answers, or null when the rewards list was never stored for this event. */
+    private suspend fun readSnapshot(eventId: String): RewardSnapshot? {
+        val rewards = cache.read<List<RewardResponse>>(
+            OrganizerSnapshots.rewards(eventId),
+            OrganizerSnapshots.REWARDS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return null
+        val redemptions = cache.read<List<RewardRedemptionResponse>>(
+            OrganizerSnapshots.claimedRewards(eventId),
+            OrganizerSnapshots.CLAIMED_REWARDS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data
+        val settings = cache.read<Boolean>(
+            OrganizerSnapshots.rewardSettings(eventId),
+            OrganizerSnapshots.REWARD_SETTINGS_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data
+        return RewardSnapshot(rewards, redemptions, settings)
+    }
+
+    /** Paints the persisted answers so the screen's body is readable before the network replies. */
+    private fun applySnapshot(snapshot: RewardSnapshot) {
+        rewards = snapshot.rewards.sortedBy { it.name.lowercase() }
+        snapshot.redemptions?.let { redemptions = it }
+        snapshot.settings?.let { rewardsEnabled = it }
+        renderRewards()
+    }
+
+    private data class RewardSnapshot(
+        val rewards: List<RewardResponse>,
+        val redemptions: List<RewardRedemptionResponse>?,
+        val settings: Boolean?,
+    )
+
+    /** The three per-event reward answers, dropped after the user's own reward change. */
+    private suspend fun invalidateRewardSnapshots(eventId: String) {
+        cache.invalidate(OrganizerSnapshots.rewards(eventId))
+        cache.invalidate(OrganizerSnapshots.claimedRewards(eventId))
+        cache.invalidate(OrganizerSnapshots.rewardSettings(eventId))
     }
 
     private fun renderRewards() {
@@ -627,6 +712,8 @@ open class ManageRewardsActivity : AppCompatActivity() {
                 if (!response.success) throw IllegalStateException(response.message ?: getString(R.string.manage_rewards_save_failed))
                 dialog.dismiss()
                 Toast.makeText(this@ManageRewardsActivity, response.message ?: getString(R.string.manage_rewards_saved), Toast.LENGTH_SHORT).show()
+                // The user's own edit must not be masked by the answer taken before it.
+                invalidateRewardSnapshots(eventId)
                 loadRewards()
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -687,6 +774,7 @@ open class ManageRewardsActivity : AppCompatActivity() {
                 val response = rewardsService.deleteReward(eventId, reward.rewardId.toString())
                 if (!response.success) throw IllegalStateException(response.message ?: getString(R.string.manage_rewards_remove_failed))
                 Toast.makeText(this@ManageRewardsActivity, response.message ?: getString(R.string.manage_rewards_removed), Toast.LENGTH_SHORT).show()
+                invalidateRewardSnapshots(eventId)
                 loadRewards()
             } catch (error: Exception) {
                 showStatus(error.message ?: getString(R.string.manage_rewards_remove_failed))
@@ -696,14 +784,18 @@ open class ManageRewardsActivity : AppCompatActivity() {
 
     private fun refreshRewardsEnabledFromServer() {
         val eventId = selectedEvent.id
+        val owner = cache.currentOwner()
         lifecycleScope.launch {
             try {
                 val response = rewardsService.getRewardSettings(eventId)
                 if (selectedEvent.id != eventId) return@launch
                 if (response.success && response.data != null) {
                     rewardsEnabled = response.data
+                    cache.write(OrganizerSnapshots.rewardSettings(eventId), rewardsEnabled, owner)
                     bindEventSummary()
-                    renderRewards()
+                    // Never repaint the body from here: with nothing loaded this would replace the load's
+                    // error state (or its loading line) with an empty-state copy.
+                    if (rewards.isNotEmpty()) renderRewards()
                 }
             } catch (_: Exception) {
                 // Server truth will be re-synced on the next refresh; keep current local state.
@@ -711,7 +803,8 @@ open class ManageRewardsActivity : AppCompatActivity() {
         }
     }
 
-    private fun setRewardsEnabled(enabled: Boolean) {
+    @VisibleForTesting
+    internal fun setRewardsEnabled(enabled: Boolean) {
         val eventId = selectedEvent.id
         lifecycleScope.launch {
             try {
@@ -719,6 +812,8 @@ open class ManageRewardsActivity : AppCompatActivity() {
                 if (selectedEvent.id != eventId) return@launch
                 if (!response.success) throw IllegalStateException(response.message ?: getString(R.string.manage_rewards_settings_failed))
                 response.data?.let { rewardsEnabled = it.rewardsEnabled }
+                // The switch changes what every card may promise, so neither answer survives it.
+                invalidateRewardSnapshots(eventId)
                 bindEventSummary()
                 renderRewards()
                 Toast.makeText(

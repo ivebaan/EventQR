@@ -21,11 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -55,26 +51,22 @@ class DashboardPresenter(
 
     /**
      * Rewards the attendee has claimed, over the events they were checked in at (a reward can only
-     * be claimed after check-in). Null = unknown: any failed call keeps the cell on `--`.
+     * be claimed after check-in). One read covers every event. Null = unknown: a failed call keeps
+     * the cell on `--`.
      */
     private suspend fun claimedRewardsCount(
         registrations: List<RegistrationResponse>,
-    ): Long? = coroutineScope {
+    ): Long? {
         val eventIds = registrations
             .filter { it.status != RegistrationStatus.CANCELLED && (it.attendedAt != null || it.enteredAt != null) }
             .map { it.eventId.toString() }
             .distinct()
-        if (eventIds.isEmpty()) return@coroutineScope 0L
-        val gate = Semaphore(4)
-        val results = eventIds
-            .map { id -> async { gate.withPermit { attendeeRepository.getMyRewardRedemptions(id) } } }
-            .awaitAll()
-        if (results.any { it !is NetworkResult.Success }) {
-            null
-        } else {
-            results.sumOf { result ->
-                (result as NetworkResult.Success).data.count { it.status == RedemptionStatus.REDEEMED }.toLong()
-            }
+        if (eventIds.isEmpty()) return 0L
+        // The repository falls back to the per-event fan-out only when the backend lacks the
+        // all-redemptions endpoint (404).
+        return when (val result = attendeeRepository.loadMyRedemptions(eventIds)) {
+            is NetworkResult.Success -> result.data.count { it.status == RedemptionStatus.REDEEMED }.toLong()
+            is NetworkResult.Error, NetworkResult.Loading -> null
         }
     }
 
@@ -135,8 +127,8 @@ class DashboardPresenter(
             val registrationsResult = registrationsDeferred.await()
 
             // The four calls above are everything the screen needs: paint now, then resolve the
-            // "Rewards claimed" cell (one redemptions call per attended event) in the background.
-            // Until it lands that cell keeps the unknown "--", so the late answer reflows nothing.
+            // "Rewards claimed" cell (one all-redemptions read) in the background. Until it lands
+            // that cell keeps the unknown "--", so the late answer reflows nothing.
             view?.showLoading(false)
 
             val now = Instant.now()
@@ -323,8 +315,8 @@ class DashboardPresenter(
                 view?.showPartialError("registrations", registrationsResult.message)
             }
 
-            // Last: the per-event redemptions fan-out the cells above do not need. Its failure is
-            // not a screen failure - the cell simply keeps "--" and the rest stays as painted.
+            // Last: the redemptions read the cells above do not need. Its failure is not a screen
+            // failure - the cell simply keeps "--" and the rest stays as painted.
             if (registrationsResult is NetworkResult.Success) {
                 val rewards = claimedRewardsCount(registrationsResult.data)
                 if (rewards != null) {

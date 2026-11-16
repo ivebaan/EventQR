@@ -25,10 +25,17 @@ import com.thedavelopers.eventqr.features.rewards.model.dto.RewardRedemptionResp
 import com.thedavelopers.eventqr.features.rewards.model.dto.RewardResponse
 import com.thedavelopers.eventqr.features.transactions.model.dto.TransactionResponse
 import com.thedavelopers.eventqr.features.uploads.model.dto.StoredFileResponse
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import retrofit2.HttpException
 import java.io.File
+import java.net.HttpURLConnection
 import java.util.UUID
 
 open class AttendeeRepository(context: Context) {
@@ -133,6 +140,36 @@ open class AttendeeRepository(context: Context) {
         }
     suspend fun getRewardRedemptions(eventId: String) = safeApiCall { apiService.getRewardRedemptions(eventId) }
     open suspend fun getMyRewardRedemptions(eventId: String) = safeApiCall { apiService.getMyClaimedRewards(eventId) }
+    /** Every redemption the caller has, across all events, in one call. */
+    open suspend fun getMyAllRedemptions(): NetworkResult<List<RewardRedemptionResponse>> =
+        safeApiCall { apiService.getMyAllRedemptions() }
+
+    /**
+     * The one read the screens use. A backend without the all-redemptions endpoint answers 404, so the
+     * app falls back to the per-event reads over [fallbackEventIds] and behaves exactly as it did
+     * before the endpoint existed. Any other failure is the failure: no second round trip.
+     */
+    open suspend fun loadMyRedemptions(fallbackEventIds: List<String>): NetworkResult<List<RewardRedemptionResponse>> {
+        val all = getMyAllRedemptions()
+        val missingEndpoint = all is NetworkResult.Error &&
+            (all.throwable as? HttpException)?.code() == HttpURLConnection.HTTP_NOT_FOUND
+        return if (missingEndpoint) fanOutRedemptions(fallbackEventIds) else all
+    }
+
+    /** All-or-error: one failed event read fails the list, as the fan-out always reported it. */
+    private suspend fun fanOutRedemptions(eventIds: List<String>): NetworkResult<List<RewardRedemptionResponse>> =
+        coroutineScope {
+            val gate = Semaphore(MAX_PARALLEL_REDEMPTION_READS)
+            val results = eventIds
+                .map { id -> async { gate.withPermit { getMyRewardRedemptions(id) } } }
+                .awaitAll()
+            val failure = results.firstOrNull { it !is NetworkResult.Success }
+            if (failure != null) {
+                failure
+            } else {
+                NetworkResult.Success(results.flatMap { (it as NetworkResult.Success).data })
+            }
+        }
     suspend fun getDashboardSummary() = safeApiCall { apiService.getDashboard() }
     suspend fun parseUuid(value: String?): UUID? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         runCatching { UUID.fromString(value.orEmpty()) }.getOrNull()
@@ -186,6 +223,8 @@ open class AttendeeRepository(context: Context) {
     private companion object {
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 20
+        /** The 404 fallback's per-event fan-out stays bounded; it is the old path, not a new one. */
+        const val MAX_PARALLEL_REDEMPTION_READS = 4
     }
 }
 

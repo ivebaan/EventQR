@@ -50,9 +50,10 @@ class TransactionHistoryPresenter(
      *   answer already on hand.
      *
      * The persisted merged list paints first (skeleton only when there is none), then the two global
-     * reads paint the list on their own, and the per-event fan-out is enrichment that lands afterwards
-     * and repaints once, so the skeleton never waits on N + M round trips. An empty base list over
-     * events that still owe ledger rows is the one case that waits for it.
+     * reads paint the list on their own, and the per-event point reads plus one all-redemptions read
+     * are enrichment that lands afterwards and repaints once, so the skeleton never waits on N + 1
+     * round trips. An empty base list over events that still owe ledger rows is the one case that
+     * waits for it.
      */
     fun load(forceNetwork: Boolean = false) {
         // Cancels the previous load and with it any enrichment still running, so a late fan-out
@@ -160,24 +161,31 @@ class TransactionHistoryPresenter(
     }
 
     /**
-     * Bounded fan-out: one round trip per event, six in flight at most. awaitAll keeps the result
-     * order aligned with the event ids so the merge stays deterministic, and the merge is the same
-     * one the base load uses, so the repainted list is the list the screen would have shown at once.
+     * Bounded fan-out for the per-event point reads, six in flight at most, plus one all-redemptions
+     * read for every event that can hold a scan-based redemption. The merge is the same one the base
+     * load uses, so the repainted list is the list the screen would have shown at once.
      *
-     * [Enrichment.failure] is null only when every per-event read answered: it gates the snapshot
-     * write, so a list missing one event's ledger rows is never persisted as the attendee's history.
+     * [Enrichment.failure] is null only when every read answered: it gates the snapshot write, so a
+     * list missing one event's ledger rows is never persisted as the attendee's history.
      */
     private suspend fun enrich(base: BaseRead): Enrichment {
         if (base.eventIds.isEmpty() && base.redemptionEventIds.isEmpty()) return Enrichment(base.rows)
-        val (pointResults, redemptionResults) = coroutineScope {
+        // Only the events the per-event fan-out used to read may contribute: the all-redemptions
+        // answer covers every event the attendee has, so it is filtered back to that set.
+        val redemptionScope = base.redemptionEventIds.toSet()
+        val (pointResults, allRedemptions) = coroutineScope {
             val limit = Semaphore(MAX_PARALLEL_EVENT_READS)
             val points = base.eventIds.map { eventId ->
                 async { limit.withPermit { repository.getMyPointTransactions(eventId) } }
             }
-            val redemptions = base.redemptionEventIds.map { eventId ->
-                async { limit.withPermit { repository.getMyRewardRedemptions(eventId) } }
+            // One read covers every event; the repository falls back to the per-event reads only
+            // when the backend lacks the endpoint (404).
+            val redemptions = if (redemptionScope.isEmpty()) {
+                null
+            } else {
+                async { repository.loadMyRedemptions(base.redemptionEventIds) }
             }
-            points.awaitAll() to redemptions.awaitAll()
+            points.awaitAll() to redemptions?.await()
         }
         var failure: String? = null
         val pointTransactions = mutableListOf<PointTransactionResponse>()
@@ -188,15 +196,16 @@ class TransactionHistoryPresenter(
             }
         }
         val redemptionScanLogIds = mutableMapOf<UUID, UUID?>()
-        for (result in redemptionResults) {
-            when (result) {
-                is NetworkResult.Success ->
-                    result.data.forEach { redemptionScanLogIds[it.redemptionId] = it.redemptionScanLogId }
-                is NetworkResult.Error, NetworkResult.Loading -> failure = mergeFailure(failure, result)
-            }
+        when (allRedemptions) {
+            null -> Unit
+            is NetworkResult.Success ->
+                allRedemptions.data
+                    .filter { it.eventId.toString() in redemptionScope }
+                    .forEach { redemptionScanLogIds[it.redemptionId] = it.redemptionScanLogId }
+            is NetworkResult.Error, NetworkResult.Loading -> failure = mergeFailure(failure, allRedemptions)
         }
         if (failure != null) {
-            Log.w(TAG, "per-event enrichment incomplete: ${failure.ifBlank { "a read did not complete" }}")
+            Log.w(TAG, "enrichment incomplete: ${failure.ifBlank { "a read did not complete" }}")
         }
         return Enrichment(
             rows = mergeTransactionHistory(base.scans, pointTransactions, base.eventTitles, redemptionScanLogIds),

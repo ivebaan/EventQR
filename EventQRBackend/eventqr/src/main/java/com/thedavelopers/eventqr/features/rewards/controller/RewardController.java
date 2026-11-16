@@ -87,6 +87,20 @@ public class RewardController {
         return ResponseEntity.ok(ApiResponse.success(rewardService.findRedemptions(eventId)));
     }
 
+    /**
+     * The caller's own redemptions across every event: one request replaces the per-event fan-out.
+     * Literal path, so it is matched ahead of {@code /redemptions/{eventId}}. Identity comes only from the token.
+     */
+    @GetMapping("/redemptions/my-redemptions")
+    public ResponseEntity<ApiResponse<List<RewardRedemptionResponse>>> findMyRedemptions(HttpServletRequest request) {
+        UUID callerId = currentUserId(request);
+        return ResponseEntity.ok(ApiResponse.success(rewardService.findMyRedemptions(callerId)));
+    }
+
+    private UUID currentUserId(HttpServletRequest request) {
+        return jwtService.extractUserIdFromBearer(request.getHeader("Authorization"));
+    }
+
     private void requireRewardWriteAccess(HttpServletRequest request, UUID eventId) {
         AccountRole role = jwtService.extractRoleFromBearer(request.getHeader("Authorization"));
         if (role == AccountRole.ADMIN || role == AccountRole.SUPER_ADMIN) {

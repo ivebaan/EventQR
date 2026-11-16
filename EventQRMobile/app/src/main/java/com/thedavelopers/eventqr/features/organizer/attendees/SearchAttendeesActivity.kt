@@ -14,6 +14,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.core.util.ScreenInsets
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_ID
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_TITLE
@@ -119,7 +121,20 @@ open class SearchAttendeesActivity : AppCompatActivity() {
 
     private fun loadAttendees() {
         lifecycleScope.launch {
-            val load = repository.loadAttendeesForMvp(selectedEvent.id)
+            val eventId = selectedEvent.id
+            // Same `organizer/attendees/{eventId}` snapshot as the management list: one key, one answer.
+            if (attendees.isEmpty()) {
+                LastKnownCache.get(this@SearchAttendeesActivity).read<List<OrganizerMvpAttendee>>(
+                    OrganizerSnapshots.attendees(eventId),
+                    OrganizerSnapshots.ATTENDEES_TYPE,
+                    OrganizerSnapshots.MAX_AGE_MS,
+                )?.data?.let { snapshot ->
+                    attendees = snapshot
+                    render()
+                }
+            }
+            val load = repository.loadAttendeesForMvp(eventId)
+            if (load.source == OrganizerMvpDataSource.ERROR && attendees.isNotEmpty()) return@launch
             attendees = load.data
             render()
         }

@@ -19,6 +19,13 @@ public interface RewardRedemptionRepository extends JpaRepository<RewardRedempti
 
     List<RewardRedemption> findByEventIdAndAttendeeUserId(UUID eventId, UUID attendeeUserId);
 
+    /**
+     * Every redemption of one attendee across all events, newest first. Ordered by created_at (not redeemed_at,
+     * which is null on REJECTED rows) with id as the deterministic tiebreak; attendee_user_id is the leading
+     * column of idx_reward_redemptions_att_reward_status, so the WHERE is index-served.
+     */
+    List<RewardRedemption> findByAttendeeUserIdOrderByCreatedAtDescIdDesc(UUID attendeeUserId);
+
     List<RewardRedemption> findByAttendeeUserIdAndRewardIdAndStatus(UUID attendeeUserId, UUID rewardId, RedemptionStatus status);
 
     long countByRewardIdAndStatus(UUID rewardId, RedemptionStatus status);

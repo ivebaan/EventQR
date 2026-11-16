@@ -1,6 +1,7 @@
 package com.thedavelopers.eventqr.features.dashboard
 
 import com.thedavelopers.eventqr.core.util.UiStrings
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -79,6 +80,14 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
     internal var loadRequests = 0
         private set
 
+    /** The pull path: a forced rotation, so a role change appears on pull. A failure is ignored. */
+    @VisibleForTesting
+    internal var sessionForcedRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshNow(it) }
+
+    /** The resume path: throttled by [SessionRefresher.refreshIfStale], never a forced rotation. */
+    @VisibleForTesting
+    internal var sessionRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshIfStale(it) }
+
     // The pass head is re-bound on every summary / role change, so keep the last values it must
     // show rather than reading them back out of the view tree.
     private var headName: String? = null
@@ -119,7 +128,10 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
 
         swipeRefreshLayout.setOnRefreshListener {
             isSwipeRefreshing = true
+            // The rows reload first: a pull asks for fresh data and the CURRENT role, and a failed
+            // rotation must never hold the reload back (offline keeps the cached session).
             reload(forceNetwork = true)
+            lifecycleScope.launch { runCatching { sessionForcedRefresh(this@DashboardActivity) } }
         }
 
         bindPassHead()
@@ -142,7 +154,7 @@ open class DashboardActivity : AppCompatActivity(), DashboardContract.View {
         // event request approval) is reflected without requiring a logout/login. The 10 min window
         // keeps a resume from spending a refresh token: launch already refreshed this session.
         lifecycleScope.launch {
-            SessionRefresher.refreshIfStale(this@DashboardActivity)
+            sessionRefresh(this@DashboardActivity)
         }
     }
 

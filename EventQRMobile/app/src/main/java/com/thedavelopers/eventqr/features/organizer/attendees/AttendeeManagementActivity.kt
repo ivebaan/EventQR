@@ -1,5 +1,6 @@
 package com.thedavelopers.eventqr.features.organizer.attendees
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -12,6 +13,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.thedavelopers.eventqr.R
+import com.thedavelopers.eventqr.core.cache.LastKnownCache
+import com.thedavelopers.eventqr.core.cache.OrganizerSnapshots
 import com.thedavelopers.eventqr.features.organizer.AttendeeManagementAdapter
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_ID
 import com.thedavelopers.eventqr.features.organizer.EXTRA_EVENT_TITLE
@@ -44,6 +47,20 @@ import kotlinx.coroutines.launch
  * status badge.
  */
 open class AttendeeManagementActivity : AppCompatActivity() {
+    private var repositoryFactory: (Context) -> OrganizerRepository = { OrganizerRepository(it) }
+
+    /** Tests set this before the first load to replace the network repository and the cache. */
+    @VisibleForTesting
+    internal fun installRepositoryFactory(factory: (Context) -> OrganizerRepository) {
+        repositoryFactory = factory
+    }
+
+    @VisibleForTesting
+    internal var cacheOverride: LastKnownCache? = null
+
+    private val cache: LastKnownCache
+        get() = cacheOverride ?: LastKnownCache.get(this)
+
     private lateinit var repository: OrganizerRepository
     private var selectedEvent: OrganizerMvpEvent? = null
     private var eventsLoadFailed = false
@@ -64,7 +81,7 @@ open class AttendeeManagementActivity : AppCompatActivity() {
         applyEventQrSystemBarAppearance(lightStatusBars = false)
         findViewById<View>(R.id.passHeadIdentity).applyEventQrTopInsetPadding()
 
-        repository = OrganizerRepository(this)
+        repository = repositoryFactory(this)
 
         passHead = findViewById(R.id.passHead)
         swipeRefresh = findViewById(R.id.swipeRefreshAttendeeManagement)
@@ -154,6 +171,8 @@ open class AttendeeManagementActivity : AppCompatActivity() {
             repository.saveSelectedEventId(event.id)
             saveSelectedEventId(event.id)
             restoreNormalUi()
+            // The previous event's rows must not survive into this one, and must not block its paint.
+            attendees = emptyList()
             loadAttendees()
         }
         eventPicker.setOptions(
@@ -187,27 +206,51 @@ open class AttendeeManagementActivity : AppCompatActivity() {
                 saveSelectedEventId(latestSelectedEvent.id)
                 bindEventPicker(eventsLoad.data, latestSelectedEvent)
             }
-            loadAttendees()
+            // A pull asks the network for the first frame: the persisted rows are skipped.
+            loadAttendees(forceNetwork = true)
         }
     }
 
-    private fun loadAttendees() {
+    /** Test handle: a pull (forceNetwork) bypasses the persisted snapshot. */
+    @VisibleForTesting
+    internal fun loadAttendees(forceNetwork: Boolean = false) {
         val event = selectedEvent ?: return
-        if (!swipeRefresh.isRefreshing) {
-            skeletonLoading.visibility = View.VISIBLE
-        }
         lifecycleScope.launch {
             val eventIdAtRequestTime = event.id
+            // The persisted list paints first: a cold open shows the rows with no skeleton, and the
+            // refresh lands under them.
+            val painted = !forceNetwork && !swipeRefresh.isRefreshing && attendees.isEmpty() && paintSnapshot(eventIdAtRequestTime)
+            if (!painted && !swipeRefresh.isRefreshing) {
+                skeletonLoading.visibility = View.VISIBLE
+            }
             val load = repository.loadAttendeesForMvp(eventIdAtRequestTime)
             if (eventIdAtRequestTime != selectedEvent?.id) {
                 swipeRefresh.isRefreshing = false
                 skeletonLoading.visibility = View.GONE
                 return@launch
             }
+            if (load.source == OrganizerMvpDataSource.ERROR && painted) {
+                // A failed refresh keeps the painted rows instead of replacing them with the error state.
+                swipeRefresh.isRefreshing = false
+                return@launch
+            }
             attendees = load.data
             swipeRefresh.isRefreshing = false
             render(load)
         }
+    }
+
+    /** Paints the persisted `organizer/attendees/{eventId}` answer; false when there is none. */
+    private suspend fun paintSnapshot(eventId: String): Boolean {
+        val snapshot = cache.read<List<OrganizerMvpAttendee>>(
+            OrganizerSnapshots.attendees(eventId),
+            OrganizerSnapshots.ATTENDEES_TYPE,
+            OrganizerSnapshots.MAX_AGE_MS,
+        )?.data ?: return false
+        attendees = snapshot
+        skeletonLoading.visibility = View.GONE
+        render(OrganizerMvpLoad(snapshot, OrganizerMvpDataSource.BACKEND))
+        return true
     }
 
     private fun showNoEventEmptyState() {

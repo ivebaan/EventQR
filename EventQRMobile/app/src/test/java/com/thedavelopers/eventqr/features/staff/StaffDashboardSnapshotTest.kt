@@ -346,6 +346,8 @@ class StaffDashboardSnapshotTest {
 
         presenter(view, switching).loadData()
         awaitUntil { view.scans == 7 }
+        // The write is a file round trip that lands after the render: wait for it instead of racing it.
+        awaitUntil { cache.fileFor(userId.toString(), StaffSnapshots.TODAY_SUMMARY).isFile }
 
         assertTrue(
             "the answer is filed under the session it was fetched for",

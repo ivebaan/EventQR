@@ -323,9 +323,7 @@ public class RewardService {
             notificationService.createRewardRedeemedNotification(request.eventId(), request.attendeeUserId(), event.getTitle(), reward.getName(), reward.getPointsRequired());
         }
 
-        return new RewardRedemptionResponse(redemption.getId(), redemption.getEventId(), redemption.getAttendeeUserId(),
-                redemption.getRewardId(), redemption.getPointsSpent(), redemption.getStatus(), redemption.getRedeemedAt(),
-                redemption.getReason(), redemption.getRedemptionScanLogId());
+        return toRedemptionResponse(redemption);
     }
 
     public List<RewardResponse> findRewards(UUID eventId) {
@@ -346,17 +344,27 @@ public class RewardService {
     }
 
     public List<RewardRedemptionResponse> findRedemptions(UUID eventId) {
-        return rewardRedemptionRepository.findByEventId(eventId).stream().map(redemption -> new RewardRedemptionResponse(
-                redemption.getId(), redemption.getEventId(), redemption.getAttendeeUserId(), redemption.getRewardId(),
-                redemption.getPointsSpent(), redemption.getStatus(), redemption.getRedeemedAt(), redemption.getReason(),
-                redemption.getRedemptionScanLogId())).toList();
+        return rewardRedemptionRepository.findByEventId(eventId).stream().map(this::toRedemptionResponse).toList();
     }
 
     public List<RewardRedemptionResponse> findRedemptions(UUID eventId, UUID attendeeUserId) {
-        return rewardRedemptionRepository.findByEventIdAndAttendeeUserId(eventId, attendeeUserId).stream().map(redemption -> new RewardRedemptionResponse(
-                redemption.getId(), redemption.getEventId(), redemption.getAttendeeUserId(), redemption.getRewardId(),
-                redemption.getPointsSpent(), redemption.getStatus(), redemption.getRedeemedAt(), redemption.getReason(),
-                redemption.getRedemptionScanLogId())).toList();
+        return rewardRedemptionRepository.findByEventIdAndAttendeeUserId(eventId, attendeeUserId).stream()
+                .map(this::toRedemptionResponse).toList();
+    }
+
+    /**
+     * One attendee's redemption history across every event, so the client needs no per-event fan-out.
+     * Empty list is a valid answer. Caller identity comes from the token (see RewardController).
+     */
+    public List<RewardRedemptionResponse> findMyRedemptions(UUID attendeeUserId) {
+        return rewardRedemptionRepository.findByAttendeeUserIdOrderByCreatedAtDescIdDesc(attendeeUserId).stream()
+                .map(this::toRedemptionResponse).toList();
+    }
+
+    private RewardRedemptionResponse toRedemptionResponse(RewardRedemption redemption) {
+        return new RewardRedemptionResponse(redemption.getId(), redemption.getEventId(), redemption.getAttendeeUserId(),
+                redemption.getRewardId(), redemption.getPointsSpent(), redemption.getStatus(),
+                redemption.getRedeemedAt(), redemption.getReason(), redemption.getRedemptionScanLogId());
     }
 
     public List<PointTransaction> findPointTransactions(UUID eventId) {

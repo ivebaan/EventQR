@@ -1,10 +1,12 @@
 package com.thedavelopers.eventqr.features.staff
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -14,6 +16,7 @@ import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
 import com.thedavelopers.eventqr.core.cache.LastKnownCache
 import com.thedavelopers.eventqr.core.session.SessionManager
+import com.thedavelopers.eventqr.core.session.SessionRefresher
 import com.thedavelopers.eventqr.core.util.PortalSwitcher
 import com.thedavelopers.eventqr.core.util.RoleMapper
 import com.thedavelopers.eventqr.core.util.UiStrings
@@ -41,6 +44,15 @@ import java.util.Locale
 open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.View {
     /** Tests set this before onCreate to point the snapshot reads at their own directory. */
     internal var cacheOverride: LastKnownCache? = null
+
+    /** The pull path: a forced rotation, so a role change appears on pull. A failure is ignored. */
+    @VisibleForTesting
+    internal var sessionForcedRefresh: suspend (Context) -> Unit = { SessionRefresher.refreshNow(it) }
+
+    /** Every load goes through [reload], so a pull can prove it still reloaded after a failed refresh. */
+    @VisibleForTesting
+    internal var loadRequests = 0
+        private set
 
     private lateinit var presenter: StaffDashboardPresenter
     private lateinit var repository: StaffRepository
@@ -95,19 +107,22 @@ open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.
         emptyRecentScans.setAction(getString(R.string.ui_staff_scan_a_pass)) { openScanner() }
 
         findViewById<View>(R.id.btnScanPass).setOnClickListener { openScanner() }
-        findViewById<View>(R.id.btnStaffDashboardRetry).setOnClickListener { presenter.loadData() }
+        findViewById<View>(R.id.btnStaffDashboardRetry).setOnClickListener { reload() }
         configureStaffBottomNav(StaffBottomNavItem.DASHBOARD)
 
         swipeRefreshLayout = findViewById(R.id.swipeRefreshDashboard)
         swipeRefreshLayout.setOnRefreshListener {
             isSwipeRefreshing = true
-            // A pull bypasses the persisted snapshots: the user asked for fresh numbers.
-            presenter.loadData(forceNetwork = true)
+            // A pull bypasses the persisted snapshots: the user asked for fresh numbers. The rows
+            // reload first, so a failed rotation below can never hold them back (offline keeps the
+            // cached session).
+            reload(forceNetwork = true)
+            lifecycleScope.launch { runCatching { sessionForcedRefresh(this@StaffDashboardActivity) } }
         }
 
         bindPassHead()
         uiReady = true
-        presenter.loadData()
+        reload()
     }
 
     override fun onResume() {
@@ -117,7 +132,7 @@ open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.
             isFirstResume = false
             return
         }
-        presenter.loadData()
+        reload()
     }
 
     override fun onDestroy() {
@@ -208,8 +223,14 @@ open class StaffDashboardActivity : AppCompatActivity(), StaffDashboardContract.
             getString(R.string.ui_staff_dashboard_error_title),
             message.ifBlank { getString(R.string.ui_staff_load_failed_body) },
         )
-        emptyRecentScans.setAction(getString(R.string.common_retry)) { presenter.loadData() }
+        emptyRecentScans.setAction(getString(R.string.common_retry)) { reload() }
         emptyRecentScans.visibility = View.VISIBLE
+    }
+
+    /** Every load path counts here, so a pull can prove the reload ran whatever the session did. */
+    private fun reload(forceNetwork: Boolean = false) {
+        loadRequests++
+        presenter.loadData(forceNetwork)
     }
 
     /** "N today" is the server summary count, never the truncated five-row list. Summary failure falls back to the loaded rows. */
