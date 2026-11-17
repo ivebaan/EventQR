@@ -78,6 +78,10 @@ class AdminEventRequestAdapter(
                 DateFormatters.formatEventDate(request.createdAt),
             )
             val status = context.getString(labelFor(request.status))
+            // §5.5: above fontScale 1.3 the title takes a second line instead of a fragment. Set on
+            // every bind, so a recycled row never keeps the line count of the scale it was built at.
+            val stacked = MetricRowStacking.stacks(context.resources.configuration.fontScale)
+            textTitle.maxLines = if (stacked) 2 else 1
 
             textAvatar.text = requester.trim().take(1).uppercase().ifBlank { "U" }
             textTitle.text = title
@@ -98,7 +102,7 @@ class AdminEventRequestAdapter(
             row.setOnClickListener { onTap(request) }
             row.accessibilityDelegate = RequestRowAccessibility
 
-            placeBadge(MetricRowStacking.stacks(context.resources.configuration.fontScale))
+            placeBadge(stacked)
         }
 
         /**

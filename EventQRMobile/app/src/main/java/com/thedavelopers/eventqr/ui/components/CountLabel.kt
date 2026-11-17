@@ -7,12 +7,14 @@ import java.util.Locale
  * `1.2K EVENTS`, `12K EVENTS`, `1.2M EVENTS`.
  *
  * The title row gives the count a 112dp cap and autosizes it 11sp -> 9sp (`overline` ->
- * `ui_pass_head_count_text_min`), which holds roughly 18 overline characters at the floor. That
- * only works while the label stays short, so the label is capped here, at the data layer: the
- * number part is at most five characters (`9223Q`) and the whole label at most [MAX_LENGTH] for
- * any [value] up to [Long.MAX_VALUE] and a unit of any length - see [format] for the final
- * degradation order when the unit is too long to fit. Autosize then stays a safety net for longer
- * translations instead of the thing that saves a 30-character string.
+ * `ui_pass_head_count_text_min`), which holds roughly 18 overline characters at the floor. That is
+ * a small-font guarantee only: above `fontScale` 1.3 the cap is lifted and the head title takes two
+ * lines instead (`PassHeadBinder.bindCompact`, note in `include_pass_head_compact.xml`). Inside the
+ * cap the label must still stay short, so it is capped here, at the data layer: the number part is
+ * at most five characters (`9223Q`) and the whole label at most [MAX_LENGTH] for any [value] up to
+ * [Long.MAX_VALUE] and a unit of any length - see [format] for the final degradation order when the
+ * unit is too long to fit. Autosize then stays a safety net for longer translations instead of the
+ * thing that saves a 30-character string.
  *
  * Formatting is locale-independent by construction - no `String.format`, no default locale, the
  * unit uppercased with [Locale.ROOT] - so the label is the same width in every locale.

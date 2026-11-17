@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import com.thedavelopers.eventqr.ui.theme.LocalGrid
 import com.thedavelopers.eventqr.ui.theme.LocalType
@@ -73,6 +75,8 @@ fun UiButton(
         Modifier
     }
     val label = if (inline) type.label else type.body.copy(fontWeight = FontWeight.SemiBold)
+    // Captured before the semantics block: its receiver also exposes `text`, and that getter throws.
+    val accessibleName = text
 
     Box(
         modifier = modifier
@@ -86,7 +90,10 @@ fun UiButton(
                 enabled = enabled && !loading,
                 role = Role.Button,
                 onClick = onClick,
-            ),
+            )
+            // While loading the label is a spinner, so the node would have no name at all: keep the
+            // accessible name the label carried. Text supplies it in every other state.
+            .semantics { if (loading) contentDescription = accessibleName },
         contentAlignment = Alignment.Center,
     ) {
         if (loading) {

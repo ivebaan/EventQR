@@ -23,7 +23,7 @@ open class AdminRepository(private val context: Context) {
     open suspend fun loadAllEventRequests(): NetworkResult<List<EventRequestResponse>> =
         safeApiCall { apiService.getAdminEventRequests() }
 
-    suspend fun getEventRequest(requestId: String): NetworkResult<EventRequestResponse> =
+    open suspend fun getEventRequest(requestId: String): NetworkResult<EventRequestResponse> =
         safeApiCall { apiService.getAdminEventRequest(requestId) }
 
     suspend fun loadUsers(role: AccountRole? = null): NetworkResult<List<UserResponse>> =
@@ -83,11 +83,11 @@ open class AdminRepository(private val context: Context) {
             NetworkResult.Loading -> NetworkResult.Loading
         }
 
-    suspend fun approveEvent(eventId: String, remarks: String?): NetworkResult<EventRequestResponse> {
+    open suspend fun approveEvent(eventId: String, remarks: String?): NetworkResult<EventRequestResponse> {
         return safeApiCall { apiService.approveEventRequest(eventId, EventRequestDecisionRequest(remarks)) }
     }
 
-    suspend fun rejectEvent(eventId: String, remarks: String?): NetworkResult<EventRequestResponse> {
+    open suspend fun rejectEvent(eventId: String, remarks: String?): NetworkResult<EventRequestResponse> {
         return safeApiCall { apiService.rejectEventRequest(eventId, EventRequestDecisionRequest(remarks)) }
     }
 

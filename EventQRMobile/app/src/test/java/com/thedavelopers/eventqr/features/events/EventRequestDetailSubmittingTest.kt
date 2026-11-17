@@ -1,5 +1,6 @@
 package com.thedavelopers.eventqr.features.events
 
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -16,9 +17,8 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
 /**
- * "One decision, one submit" (§6.5): while a decision is in flight both footer controls are
- * disabled, and they come back the moment it settles. `isLoading` alone is not the guard - a pull
- * to refresh over a loaded request is `isLoading` too - so the test flips it under the same request.
+ * "One decision, one submit" (§6.5): the footer is locked by the decision in flight, not by the
+ * load state, so a refresh or the reread a 409 starts never disables a live Approve or Reject.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -34,9 +34,10 @@ class EventRequestDetailSubmittingTest {
         status = EventRequestStatus.PENDING,
     )
 
-    @Test
-    fun footerIsDisabledOnlyWhileADecisionIsInFlight() {
-        val loading = mutableStateOf(true)
+    private fun setScreen(
+        loading: MutableState<Boolean> = mutableStateOf(false),
+        pendingAction: MutableState<RequestDecision?> = mutableStateOf(null),
+    ) {
         composeTestRule.setContent {
             EventQrTheme {
                 EventRequestDetailScreen(
@@ -47,14 +48,36 @@ class EventRequestDetailSubmittingTest {
                     onRetryClick = {},
                     onApproveClick = {},
                     onRejectClick = {},
+                    pendingAction = pendingAction.value,
                 )
             }
         }
+    }
 
-        composeTestRule.onNodeWithText("Approve").assertIsNotEnabled()
+    @Test
+    fun aLoadInFlightKeepsBothButtonsLive() {
+        setScreen(loading = mutableStateOf(true))
+
+        composeTestRule.onNodeWithText("Approve").assertIsEnabled()
+        composeTestRule.onNodeWithText("Reject").assertIsEnabled()
+    }
+
+    @Test
+    fun footerIsDisabledOnlyWhileADecisionIsInFlight() {
+        val pendingAction = mutableStateOf<RequestDecision?>(null)
+        setScreen(pendingAction = pendingAction)
+
+        composeTestRule.onNodeWithText("Approve").assertIsEnabled()
+        composeTestRule.onNodeWithText("Reject").assertIsEnabled()
+
+        pendingAction.value = RequestDecision.APPROVE
+        composeTestRule.waitForIdle()
+
+        // The submitter holds its label slot with a spinner (§5.1); the other control is locked.
+        composeTestRule.onNodeWithText("Approve").assertDoesNotExist()
         composeTestRule.onNodeWithText("Reject").assertIsNotEnabled()
 
-        loading.value = false
+        pendingAction.value = null
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithText("Approve").assertIsEnabled()

@@ -10,8 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
@@ -19,12 +18,16 @@ import com.thedavelopers.eventqr.core.api.dto.EventRequestStatus
 import com.thedavelopers.eventqr.features.events.model.dto.EventRequestResponse
 import com.thedavelopers.eventqr.ui.components.CountLabel
 import com.thedavelopers.eventqr.ui.components.EventQrEmptyState
+import com.thedavelopers.eventqr.ui.components.EventQrSwipeRefreshLayout
 import com.thedavelopers.eventqr.ui.components.PassHeadBinder
 import com.thedavelopers.eventqr.ui.components.asFilterChips
+import com.thedavelopers.eventqr.ui.components.showInlineError
 import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.applyEventQrSystemBarAppearance
 import com.thedavelopers.eventqr.ui.theme.applyEventQrTopInsetPadding
 import java.time.Instant
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -45,7 +48,7 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
 
     private lateinit var adapter: AdminEventRequestAdapter
 
-    private lateinit var swipeRefresh: SwipeRefreshLayout
+    private lateinit var swipeRefresh: EventQrSwipeRefreshLayout
     private lateinit var chipPending: TextView
     private lateinit var chipApproved: TextView
     private lateinit var chipRejected: TextView
@@ -54,19 +57,21 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
     private lateinit var skeletonRequests: View
     private lateinit var textEmpty: EventQrEmptyState
     private lateinit var recyclerRequests: RecyclerView
+    private lateinit var errorStrip: View
+    private lateinit var progressRefresh: LinearProgressIndicator
 
     private var allRequests = emptyList<EventRequestResponse>()
     private var currentFilter: EventRequestFilter = EventRequestFilter.PENDING
     private var loadFailed = false
-    private var retrySnackbar: Snackbar? = null
+    // A chip flip before the first successful load must not paint the filter's empty copy over a
+    // load that is still running (§6.8 #1), so rendering waits for the first answer.
+    private var loaded = false
+    // The newest list load. Retry, pull to refresh and a detail return all funnel here, so only the
+    // last one may write `allRequests`.
+    private var loadJob: Job? = null
 
     private val detailLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         loadRequests(showLoading = false)
-    }
-
-    override fun onDestroy() {
-        retrySnackbar?.dismiss()
-        super.onDestroy()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,7 +107,37 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
         skeletonRequests = findViewById(R.id.skeletonRequests)
         textEmpty = findViewById(R.id.textEmpty)
         recyclerRequests = findViewById(R.id.recyclerRequests)
+        errorStrip = findViewById(R.id.errorStrip)
+        errorStrip.findViewById<View>(R.id.btnErrorStripRetry).setOnClickListener {
+            // The strip is the only refresh cue, so a retry tap paints it while it runs. The rows
+            // stay put: no skeleton for a retry over readable content.
+            swipeRefresh.isRefreshing = true
+            loadRequests(showLoading = false)
+        }
 
+        // §6.8: the refresh state is a flat in-flow strip, not the swipe layout's raised disc.
+        // While a finger pulls it is determinate, so the gesture has an affordance before release;
+        // the refresh listener owns the indeterminate state, and both leave it hidden at the end.
+        progressRefresh = findViewById(R.id.progressRefresh)
+        swipeRefresh.onRefreshStateChanged = { refreshing ->
+            if (refreshing) {
+                progressRefresh.isIndeterminate = true
+                progressRefresh.visibility = View.VISIBLE
+            } else {
+                hideRefreshStrip()
+            }
+        }
+        swipeRefresh.onPullProgress = { fraction ->
+            when (fraction) {
+                // A released drag hands the strip over to the refresh state above.
+                null -> if (!swipeRefresh.isRefreshing) hideRefreshStrip()
+                else -> {
+                    progressRefresh.isIndeterminate = false
+                    progressRefresh.visibility = View.VISIBLE
+                    progressRefresh.setProgressCompat((fraction * 100f).roundToInt(), false)
+                }
+            }
+        }
         swipeRefresh.setOnRefreshListener { loadRequests(showLoading = false) }
     }
 
@@ -166,17 +201,22 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
     }
 
     private fun loadRequests(showLoading: Boolean) {
-        retrySnackbar?.dismiss()
+        errorStrip.visibility = View.GONE
         if (showLoading && !swipeRefresh.isRefreshing) {
             setLoadingState(true)
         }
 
-        lifecycleScope.launch {
+        // The strip's Retry, pull to refresh and the return from the detail can overlap; the newest
+        // request owns the list, so an older answer never repaints rows over it.
+        loadJob?.cancel()
+        loadJob = lifecycleScope.launch {
             when (val result = repository.loadAllEventRequests()) {
                 is NetworkResult.Success -> {
                     swipeRefresh.isRefreshing = false
                     allRequests = result.data
                     loadFailed = false
+                    loaded = true
+                    errorStrip.visibility = View.GONE
                     setLoadingState(false)
                     renderList()
                 }
@@ -184,12 +224,12 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
                     swipeRefresh.isRefreshing = false
                     setLoadingState(false)
                     val message = toFriendlyError(result.message)
-                    // Rows already on screen stay put: the failure is a transient banner, not a
+                    // Rows already on screen stay put: the failure is a transient strip, not a
                     // page state. Only a page with no data at all hands the slot to the error state.
                     if (allRequests.isEmpty()) {
                         showError(message) { loadRequests(showLoading = true) }
                     } else {
-                        showRetrySnackbar(message)
+                        errorStrip.showInlineError(message)
                     }
                 }
                 NetworkResult.Loading -> Unit
@@ -200,8 +240,9 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
     private fun applyFilter(filter: EventRequestFilter) {
         currentFilter = filter
         updateFilterChips(filter)
-        // The failure owns the slot until a load succeeds; a filter must not replace it with empty copy.
-        if (loadFailed) return
+        // The first load has no answer yet, so a chip flip must not paint its empty copy over the
+        // running request (§6.8 #1). The failure owns the slot until a load succeeds.
+        if (!loaded || loadFailed) return
         renderList()
     }
 
@@ -266,9 +307,17 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
         }
     }
 
+    /** The strip is one state: a failure or a finished refresh must leave none of it painted. */
+    private fun hideRefreshStrip() {
+        progressRefresh.visibility = View.GONE
+    }
+
     /** §6.8 state 3: a failed load owns the empty slot, with the recovery as its only action. */
     private fun showError(message: String, retry: () -> Unit) {
         loadFailed = true
+        // A failure owns the page, so no refresh may keep the strip (or a restored flag) alive.
+        swipeRefresh.isRefreshing = false
+        hideRefreshStrip()
         textCount.text = ""
         recyclerRequests.visibility = View.GONE
         textEmpty.setIcon(AppIcons.Warning)
@@ -276,21 +325,12 @@ class AdminEventApprovalBackendActivity : AppCompatActivity() {
         textEmpty.setAction(getString(R.string.common_retry)) { retry() }
     }
 
-    /**
-     * A refresh over rows that are already on screen keeps them and offers the retry in a banner:
-     * replacing readable rows with an error state would lose the admin's place in the queue.
-     */
-    private fun showRetrySnackbar(message: String) {
-        retrySnackbar?.dismiss()
-        retrySnackbar = Snackbar.make(recyclerRequests, message, Snackbar.LENGTH_INDEFINITE)
-            .setAction(R.string.common_retry) { loadRequests(showLoading = false) }
-        retrySnackbar?.show()
-    }
-
     /** Access denied is one in-flow error with one action. No toast duplicates the message. */
     private fun showAccessDenied() {
         loadFailed = true
         setLoadingState(false)
+        swipeRefresh.isRefreshing = false
+        hideRefreshStrip()
         textCount.text = ""
         recyclerRequests.visibility = View.GONE
         textEmpty.setIcon(AppIcons.Warning)

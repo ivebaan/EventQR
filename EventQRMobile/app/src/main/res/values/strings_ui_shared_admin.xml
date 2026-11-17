@@ -172,7 +172,7 @@
     <string name="ui_request_detail_confirm_reject">Reject request?</string>
     <string name="ui_request_detail_confirm_approve_body">The requester is notified and the event becomes live.</string>
     <string name="ui_request_detail_confirm_reject_body">The requester is notified. This cannot be undone.</string>
-    <string name="ui_request_detail_remarks">Remarks (optional)</string>
+    <string name="ui_request_detail_remarks_label">Remarks (optional)</string>
     <string name="ui_request_detail_title">Event request</string>
     <string name="ui_request_detail_approved">Request approved</string>
     <string name="ui_request_detail_rejected">Request rejected</string>
@@ -183,10 +183,12 @@
     <string name="ui_admin_error_admin_required">Admin access required.</string>
     <string name="ui_admin_error_not_found">Request not found.</string>
     <string name="ui_admin_error_bad_request">Request failed. Check the request state and try again.</string>
-    <string name="ui_admin_error_conflict">This request was already reviewed. Refresh the list.</string>
+    <string name="ui_admin_error_conflict">This request was already reviewed.</string>
     <string name="ui_admin_error_server">Server error. Try again later.</string>
     <string name="ui_admin_error_network">No internet connection. Check your network and try again.</string>
-    <string name="ui_admin_error_action_state">Action cannot be completed in the current state.</string>
+    <!-- A 400 from the decision endpoint is its own validation (the remarks), not a state conflict:
+         say what to check, and keep it retryable instead of reloading the request. -->
+    <string name="ui_admin_error_decision">Couldn\'t submit the decision. Check the remarks and try again.</string>
     <string name="ui_admin_error_body">Pull down to refresh.</string>
     <string name="ui_admin_go_back">Go back</string>
 

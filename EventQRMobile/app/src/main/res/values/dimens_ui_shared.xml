@@ -119,6 +119,16 @@
          ui_radius_badge, ui_primary fill over a ui_surface_sunken track. Not a chart span, so it does
          not borrow ui_chart_bar_height; a fixed height is correct here because the bar carries no text. -->
     <dimen name="ui_progress_height">4dp</dimen>
+    <!-- Pull-to-refresh in-progress strip (§6.8): a flat 2dp ui_primary line in flow under the chip
+         row, inset to the gutter, over a ui_hairline track, so the state takes its own height and
+         never overlaps a row. The swipe layout's stock disc is suppressed (its 4dp elevation shadow
+         is a §9.6 #8 failure). -->
+    <dimen name="ui_refresh_strip_height">2dp</dimen>
+    <!-- Pull distance that arms the refresh. Pinned on the one screen that paints the strip
+         determinate, because SwipeRefreshLayout exposes no getter for its own trigger distance and
+         the fraction would otherwise guess. 64dp is the pinned 1.1.0 default, so the gesture itself
+         is unchanged. -->
+    <dimen name="ui_refresh_pull_trigger">64dp</dimen>
     <dimen name="ui_skeleton_bar_height">12dp</dimen>
     <dimen name="ui_skeleton_title_width">160dp</dimen>
     <dimen name="ui_skeleton_label_width">80dp</dimen>

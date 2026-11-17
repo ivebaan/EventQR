@@ -3,8 +3,11 @@ package com.thedavelopers.eventqr.features.events
 import android.content.Context
 import android.view.LayoutInflater
 import android.widget.TextView
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,10 +45,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -62,29 +70,56 @@ import com.thedavelopers.eventqr.core.util.DateFormatters
 import com.thedavelopers.eventqr.features.events.model.dto.EventRequestResponse
 import com.thedavelopers.eventqr.ui.components.EmptyState
 import com.thedavelopers.eventqr.ui.components.EventBadgeStatus
+import com.thedavelopers.eventqr.ui.components.InlineErrorStrip
+import com.thedavelopers.eventqr.ui.components.MetricRowStacking
 import com.thedavelopers.eventqr.ui.components.StatusBadge
 import com.thedavelopers.eventqr.ui.components.UiButton
 import com.thedavelopers.eventqr.ui.components.UiButtonTone
 import com.thedavelopers.eventqr.ui.icons.AppIcons
 import com.thedavelopers.eventqr.ui.theme.LocalGrid
 import com.thedavelopers.eventqr.ui.theme.LocalType
+import com.thedavelopers.eventqr.ui.theme.UiDisabledFill
 import com.thedavelopers.eventqr.ui.theme.UiError
 import com.thedavelopers.eventqr.ui.theme.UiErrorContainer
 import com.thedavelopers.eventqr.ui.theme.UiHairline
 import com.thedavelopers.eventqr.ui.theme.UiOnErrorContainer
+import com.thedavelopers.eventqr.ui.theme.UiOnPrimary
 import com.thedavelopers.eventqr.ui.theme.UiOnSuccessContainer
 import com.thedavelopers.eventqr.ui.theme.UiPrimary
 import com.thedavelopers.eventqr.ui.theme.UiSuccessContainer
 import com.thedavelopers.eventqr.ui.theme.UiSurface
 import com.thedavelopers.eventqr.ui.theme.UiSurfaceSunken
+import com.thedavelopers.eventqr.ui.theme.UiTextDisabled
 import com.thedavelopers.eventqr.ui.theme.UiTextPrimary
 import com.thedavelopers.eventqr.ui.theme.UiTextSecondary
 import java.util.UUID
 
-private enum class ConfirmAction {
+/**
+ * The one decision this screen can submit. It names the confirm dialog's pending action and, while
+ * a submit is in flight, which footer control owns the spinner (§5.1, §6.5).
+ */
+enum class RequestDecision {
     APPROVE,
     REJECT,
 }
+
+/**
+ * Why a load failed, as a type instead of a sentence: the screen keys its recovery on this, so a
+ * reworded or translated message can never turn an access failure into a Retry that fails again.
+ * `Access` and `NotFound` cannot be retried; `Retryable` is the ghost Retry (§6.8 #3, #20).
+ */
+enum class DetailErrorKind {
+    ACCESS,
+    NOT_FOUND,
+    RETRYABLE,
+}
+
+/**
+ * ACCESS and NOT_FOUND cannot be recovered on this screen: a Retry would fail the same way, so the
+ * screen offers the way back instead and never leaves a strip or a decision footer live over it.
+ */
+private val DetailErrorKind?.cannotRetry: Boolean
+    get() = this == DetailErrorKind.ACCESS || this == DetailErrorKind.NOT_FOUND
 
 internal fun eventRequestBadgeStatus(status: EventRequestStatus): EventBadgeStatus = when (status) {
     EventRequestStatus.APPROVED -> EventBadgeStatus.APPROVED
@@ -143,16 +178,55 @@ fun EventRequestDetailScreen(
     onRejectClick: ((remarks: String?) -> Unit)? = null,
     decisionMessage: String? = null,
     decisionIsError: Boolean = false,
+    pendingAction: RequestDecision? = null,
+    errorKind: DetailErrorKind? = null,
     modifier: Modifier = Modifier,
 ) {
     val grid = LocalGrid.current
     val type = LocalType.current
     val context = LocalContext.current
-    var showConfirmDialog by remember { mutableStateOf<ConfirmAction?>(null) }
+    // §6.4 / §9.3, the same rule the organizer and attendee spec rows follow: above `fontScale`
+    // 1.3 an overline label and its value cannot share one 320dp row, so both stack.
+    val stacked = MetricRowStacking.stacks(LocalConfiguration.current.fontScale)
+    // Both survive a rotation: the dialog was open, so it reopens, and the typed remarks come back
+    // with it. Only the enum name is saved, so an unknown value simply closes the dialog.
+    var confirmActionName by rememberSaveable { mutableStateOf<String?>(null) }
     var remarksText by rememberSaveable { mutableStateOf("") }
-    // A decision in flight locks both controls: one request, one verdict, no double submit. A pull
-    // to refresh over loaded content is `isLoading` too, so the guard is narrowed to a live request.
-    val isSubmitting = isLoading && request != null
+    // The last sentence announced, so a rotation does not read the same failure into the new window.
+    var announcedError by rememberSaveable { mutableStateOf<String?>(null) }
+    val confirmAction = RequestDecision.entries.firstOrNull { it.name == confirmActionName }
+    // A decision in flight locks both controls: one request, one verdict, no double submit. A
+    // refresh or the read a 409 triggers is a load, not a submission, so neither locks the footer.
+    val isSubmitting = pendingAction != null
+
+    // The XML twin announces through `showInlineError`; the Compose mirror has no side effect, so
+    // the host announces a new sentence itself - never a live region, which would swallow the
+    // strip's Retry as its own node.
+    val view = LocalView.current
+    LaunchedEffect(errorMessage) {
+        val message = errorMessage
+        if (message.isNullOrBlank()) {
+            announcedError = null
+        } else if (message != announcedError) {
+            announcedError = message
+            view.announceForAccessibility(message)
+        }
+    }
+
+    // A decision that landed consumes the typed reason; a failed one keeps it, so the admin can
+    // retry with the words they already wrote.
+    LaunchedEffect(decisionMessage, decisionIsError) {
+        if (!decisionMessage.isNullOrBlank() && !decisionIsError) remarksText = ""
+    }
+
+    // A reload (or the decision itself) can move the request off PENDING, and then the dialog's
+    // verb no longer applies: it closes instead of sitting over a decided request. An access or
+    // missing-request failure closes it too - the footer it would act on is gone with the content.
+    LaunchedEffect(request?.status, errorKind) {
+        if (errorKind.cannotRetry || (request != null && request.status != EventRequestStatus.PENDING)) {
+            confirmActionName = null
+        }
+    }
 
     Box(
         modifier = modifier
@@ -162,14 +236,30 @@ fun EventRequestDetailScreen(
         when {
             isLoading && request == null -> DetailSkeleton()
 
-            errorMessage != null && request == null -> EmptyState(
-                icon = AppIcons.Error,
-                title = stringResource(R.string.ui_request_detail_error_title),
-                description = errorMessage,
-                actionLabel = stringResource(R.string.common_retry),
-                onActionClick = onRetryClick,
-                primaryAction = true,
-            )
+            errorMessage != null && request == null -> {
+                // §6.8 #20: the head is blank too, so the failure is the whole page. Recovery is a
+                // ghost action (§6.8 #3), never a primary: nothing here is the screen's main task.
+                // An access or missing-request failure cannot be retried, so it offers the way back
+                // instead of a Retry that would fail the same way.
+                val noRetry = errorKind.cannotRetry
+                // The activity is the direct way back; outside one (a preview) the back dispatcher
+                // still owns the decision, so a no-retry failure never offers a dead tap.
+                val activity = LocalActivity.current
+                val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+                val goBack: () -> Unit = {
+                    if (activity != null) activity.finish() else backDispatcher?.onBackPressed()
+                }
+                EmptyState(
+                    icon = AppIcons.Error,
+                    title = stringResource(R.string.ui_request_detail_error_title),
+                    description = errorMessage,
+                    actionLabel = stringResource(
+                        if (noRetry) R.string.ui_admin_go_back else R.string.common_retry,
+                    ),
+                    onActionClick = if (noRetry) goBack else onRetryClick,
+                    primaryAction = false,
+                )
+            }
 
             request != null -> Column(modifier = Modifier.fillMaxSize()) {
                 Column(
@@ -178,21 +268,54 @@ fun EventRequestDetailScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = grid.gutter),
                 ) {
-                    // ── Identity: name, status badge, who and when ──
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = grid.s20),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Text(
-                            text = request.eventName.ifBlank { stringResource(R.string.common_untitled_event) },
-                            style = type.titleL,
-                            color = UiTextPrimary,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f).semantics { heading() },
+                    // §6.8 #19: a load that fails over a request already on screen keeps the
+                    // content and reports itself here, under the head, instead of being swallowed.
+                    // The host announces it (see the screen's top-level effect); the strip itself
+                    // carries no live region, so its Retry stays its own node. A failure no retry
+                    // can fix never reaches this branch: the request is dropped, so the screen
+                    // shows the error empty state instead.
+                    if (!errorMessage.isNullOrBlank() && !errorKind.cannotRetry) {
+                        InlineErrorStrip(
+                            message = errorMessage,
+                            onRetry = onRetryClick,
+                            // §5.16 the XML strip's top margin is `space_md`, not `space_16`.
+                            modifier = Modifier.padding(top = grid.s12),
                         )
-                        Spacer(modifier = Modifier.size(grid.s8))
-                        StatusBadge(status = eventRequestBadgeStatus(request.status), showIcon = false)
+                    }
+
+                    // ── Identity: name, status badge, who and when ──
+                    // At or below 1.3 the badge trails the title on one row; above it the title takes
+                    // the full width and the badge drops beneath (`space_8`), start aligned, exactly
+                    // as the admin queue rows reflow (§6.5). The name never clips while stacked.
+                    val eventTitle = request.eventName.ifBlank { stringResource(R.string.common_untitled_event) }
+                    val badgeStatus = eventRequestBadgeStatus(request.status)
+                    if (stacked) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = grid.s20)) {
+                            Text(
+                                text = eventTitle,
+                                style = type.titleL,
+                                color = UiTextPrimary,
+                                modifier = Modifier.semantics { heading() },
+                            )
+                            Spacer(modifier = Modifier.height(grid.s8))
+                            StatusBadge(status = badgeStatus, showIcon = false)
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = grid.s20),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                text = eventTitle,
+                                style = type.titleL,
+                                color = UiTextPrimary,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).semantics { heading() },
+                            )
+                            Spacer(modifier = Modifier.size(grid.s8))
+                            StatusBadge(status = badgeStatus, showIcon = false)
+                        }
                     }
 
                     if (isAdmin) {
@@ -222,15 +345,17 @@ fun EventRequestDetailScreen(
                         modifier = Modifier.padding(top = grid.s4),
                     )
 
+                    // §6.8: a decision result stays in the flow; a toast would leave the screen
+                    // silent. It sits directly under the identity block, before the reason, so a
+                    // long reason can never push the outcome below the fold.
+                    if (!decisionMessage.isNullOrBlank()) {
+                        DecisionStrip(message = decisionMessage, isError = decisionIsError)
+                    }
+
                     // An admin decides on the requester's own words, so they sit right under the
                     // identity block instead of after the spec table. For an attendee the reason is
                     // the last thing they wrote, so it stays at the end of the page.
                     if (isAdmin) ReasonBlock(request.reasonForRequest)
-
-                    // §6.8: a decision result stays in the flow; a toast would leave the screen silent.
-                    if (!decisionMessage.isNullOrBlank()) {
-                        DecisionStrip(message = decisionMessage, isError = decisionIsError)
-                    }
 
                     if (request.status == EventRequestStatus.APPROVED || request.status == EventRequestStatus.REJECTED) {
                         val approval = request.status == EventRequestStatus.APPROVED
@@ -287,37 +412,44 @@ fun EventRequestDetailScreen(
                     Spacer(modifier = Modifier.height(grid.s32))
                 }
 
-                if (isAdmin && request.status == EventRequestStatus.PENDING) {
+                // An access or missing-request failure hides the decision pair: a session or role
+                // that is gone must never be offered a verdict, and no footer may stay live under
+                // a failure no retry can fix.
+                if (
+                    isAdmin &&
+                    request.status == EventRequestStatus.PENDING &&
+                    !errorKind.cannotRetry
+                ) {
                     ApprovalFooter(
-                        enabled = !isSubmitting,
-                        onReject = {
-                            remarksText = ""
-                            showConfirmDialog = ConfirmAction.REJECT
-                        },
-                        onApprove = {
-                            remarksText = ""
-                            showConfirmDialog = ConfirmAction.APPROVE
-                        },
+                        pendingAction = pendingAction,
+                        // Opening a confirm never clears the typed reason: the field holds it until
+                        // a verdict lands, and only a successful one consumes it.
+                        onReject = { confirmActionName = RequestDecision.REJECT.name },
+                        onApprove = { confirmActionName = RequestDecision.APPROVE.name },
                     )
                 }
             }
         }
     }
 
-    showConfirmDialog?.let { action ->
+    confirmAction?.let { action ->
         ConfirmDialog(
             action = action,
             remarks = remarksText,
             isSubmitting = isSubmitting,
             onRemarksChange = { remarksText = it },
-            onDismiss = { showConfirmDialog = null },
+            onDismiss = {
+                confirmActionName = null
+                remarksText = ""
+            },
             onConfirm = {
-                val act = showConfirmDialog
-                showConfirmDialog = null
-                when (act) {
-                    ConfirmAction.APPROVE -> onApproveClick?.invoke(remarksText.ifBlank { null })
-                    ConfirmAction.REJECT -> onRejectClick?.invoke(remarksText.ifBlank { null })
-                    null -> Unit
+                // The field is cleared by the verdict, not by the tap: a 5xx or a dead connection
+                // must keep the reason the admin already typed.
+                val remarks = remarksText.ifBlank { null }
+                confirmActionName = null
+                when (action) {
+                    RequestDecision.APPROVE -> onApproveClick?.invoke(remarks)
+                    RequestDecision.REJECT -> onRejectClick?.invoke(remarks)
                 }
             },
         )
@@ -384,7 +516,7 @@ private fun DetailSkeleton() {
 /** 72dp sticky footer (§6.7): destructive-outline Reject, 8dp gap, primary Approve last. */
 @Composable
 private fun ApprovalFooter(
-    enabled: Boolean,
+    pendingAction: RequestDecision?,
     onReject: () -> Unit,
     onApprove: () -> Unit,
 ) {
@@ -418,13 +550,19 @@ private fun ApprovalFooter(
                 onClick = onReject,
                 modifier = Modifier.weight(1f),
                 tone = UiButtonTone.DESTRUCTIVE,
-                enabled = enabled,
+                // The submitter keeps the enabled palette so its spinner is drawn on the live fill;
+                // `loading` already blocks its clicks. Every other control stays disabled, so a
+                // second verdict cannot be fired.
+                enabled = pendingAction == null || pendingAction == RequestDecision.REJECT,
+                // §5.1: the submitter holds the label slot with a 20dp spinner and keeps its width.
+                loading = pendingAction == RequestDecision.REJECT,
             )
             UiButton(
                 text = stringResource(R.string.ui_request_detail_approve),
                 onClick = onApprove,
                 modifier = Modifier.weight(1f),
-                enabled = enabled,
+                enabled = pendingAction == null || pendingAction == RequestDecision.APPROVE,
+                loading = pendingAction == RequestDecision.APPROVE,
             )
         }
     }
@@ -495,42 +633,65 @@ private fun JustifiedBody(text: String) {
  * a minimum height, not a fixed one, so a long value or a large font scale wraps and grows. The label
  * hugs its own text and the value takes the rest of the row - the attendee event detail's geometry -
  * because a 50/50 split forces a full `12 Oct 2026, 9:41 AM` line to break inside the timestamp.
+ *
+ * Above `fontScale` 1.3 the pair stacks through the shared [MetricRowStacking] rule: the label on
+ * top, the value start-aligned `space_4` under it, the same `space_12` padding and hairline. Both
+ * texts stay one merged TalkBack node either way.
  */
 @Composable
 private fun SpecRow(label: String, value: String) {
     val grid = LocalGrid.current
     val type = LocalType.current
+    val stacked = MetricRowStacking.stacks(LocalConfiguration.current.fontScale)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {},
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = grid.metricRowHeight)
-                .padding(vertical = grid.s12),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                style = type.overline,
-                color = UiTextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = value,
-                style = type.numericS,
-                color = UiTextPrimary,
-                textAlign = TextAlign.End,
-                // A long value wraps inside its share instead of ellipsizing the fact away. The
-                // share is filled, not shrunk to the text: that is what pins every value to the
-                // row's end edge, including a one-word one.
+        if (stacked) {
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(start = grid.s16),
-            )
+                    .fillMaxWidth()
+                    .heightIn(min = grid.metricRowHeight)
+                    .padding(vertical = grid.s12),
+            ) {
+                Text(text = label, style = type.overline, color = UiTextSecondary)
+                Text(
+                    text = value,
+                    style = type.numericS,
+                    color = UiTextPrimary,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.padding(top = grid.s4),
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = grid.metricRowHeight)
+                    .padding(vertical = grid.s12),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = label,
+                    style = type.overline,
+                    color = UiTextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = value,
+                    style = type.numericS,
+                    color = UiTextPrimary,
+                    textAlign = TextAlign.End,
+                    // A long value wraps inside its share instead of ellipsizing the fact away. The
+                    // share is filled, not shrunk to the text: that is what pins every value to the
+                    // row's end edge, including a one-word one.
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = grid.s16),
+                )
+            }
         }
         Box(modifier = Modifier.fillMaxWidth().height(dimensionResource(R.dimen.stroke_hairline)).background(UiHairline))
     }
@@ -578,12 +739,15 @@ private fun NoteBlock(
 }
 
 /**
- * Confirm dialog (§5.12): radius 16, title 18/600, body 15 secondary, text actions, destructive
- * commit filled in the error tone with the verb as its label.
+ * Confirm dialog (§5.12): radius 16, title 18/600, body 15 secondary, actions right-aligned, the
+ * primary last. A destructive confirm's commit is the one filled red control in the flow - `ui_error`
+ * fill, `ui_on_primary` label at 6.59:1, 48dp floor, `radiusButton` - and its label is the verb
+ * (`Reject`), never the question. The safe action (Approve) stays the dialog's primary text action
+ * and the ghost cancel sits beside it.
  */
 @Composable
 private fun ConfirmDialog(
-    action: ConfirmAction,
+    action: RequestDecision,
     remarks: String,
     isSubmitting: Boolean,
     onRemarksChange: (String) -> Unit,
@@ -594,24 +758,23 @@ private fun ConfirmDialog(
     val type = LocalType.current
     val title = stringResource(
         when (action) {
-            ConfirmAction.APPROVE -> R.string.ui_request_detail_confirm_approve
-            ConfirmAction.REJECT -> R.string.ui_request_detail_confirm_reject
+            RequestDecision.APPROVE -> R.string.ui_request_detail_confirm_approve
+            RequestDecision.REJECT -> R.string.ui_request_detail_confirm_reject
         },
     )
     val body = stringResource(
         when (action) {
-            ConfirmAction.APPROVE -> R.string.ui_request_detail_confirm_approve_body
-            ConfirmAction.REJECT -> R.string.ui_request_detail_confirm_reject_body
+            RequestDecision.APPROVE -> R.string.ui_request_detail_confirm_approve_body
+            RequestDecision.REJECT -> R.string.ui_request_detail_confirm_reject_body
         },
     )
     // The commit names its own verb; it never reuses the question as its label.
     val commitLabel = stringResource(
         when (action) {
-            ConfirmAction.APPROVE -> R.string.ui_request_detail_approve
-            ConfirmAction.REJECT -> R.string.ui_request_detail_reject
+            RequestDecision.APPROVE -> R.string.ui_request_detail_approve
+            RequestDecision.REJECT -> R.string.ui_request_detail_reject
         },
     )
-    val commitColor = if (action == ConfirmAction.REJECT) UiError else UiPrimary
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -628,16 +791,26 @@ private fun ConfirmDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = !isSubmitting,
-            ) {
-                Text(
-                    text = commitLabel,
-                    style = type.label,
-                    color = commitColor,
-                    fontWeight = FontWeight.SemiBold,
+            if (action == RequestDecision.REJECT) {
+                // §5.1 destructive commit: the verb on `ui_error`, filled, 48dp - a filled red
+                // control exists only inside a confirm.
+                DestructiveCommitButton(
+                    label = commitLabel,
+                    enabled = !isSubmitting,
+                    onClick = onConfirm,
                 )
+            } else {
+                TextButton(
+                    onClick = onConfirm,
+                    enabled = !isSubmitting,
+                ) {
+                    Text(
+                        text = commitLabel,
+                        style = type.label,
+                        color = UiPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         },
         dismissButton = {
@@ -648,7 +821,43 @@ private fun ConfirmDialog(
     )
 }
 
-/** `bg_ui_field` language in Compose: sunken 4dp-radius box, no outline, 2dp focus stroke. */
+/**
+ * §5.1 destructive commit: `ui_error` fill, `ui_on_primary` label (6.59:1), `radiusButton`, 48dp floor.
+ * Not a shared component on purpose - the plan allows this tone only inside a confirm dialog, and
+ * this is the app's confirm that rejects a request. The disabled label is `ui_text_disabled`, the
+ * same token [UiButton] uses, so one fill family has one disabled label colour.
+ */
+@Composable
+private fun DestructiveCommitButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val grid = LocalGrid.current
+    val type = LocalType.current
+    Box(
+        modifier = Modifier
+            .heightIn(min = grid.touchMin)
+            .clip(RoundedCornerShape(grid.radiusButton))
+            .background(if (enabled) UiError else UiDisabledFill)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = grid.s16),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = type.label,
+            color = if (enabled) UiOnPrimary else UiTextDisabled,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+/**
+ * `bg_ui_field` language in Compose: sunken 4dp-radius box, no outline, 2dp focus stroke, and the
+ * static `overline` label above it (§5.2). The label is the field's visible name; the box carries no
+ * placeholder, so an empty field never borrows the label as hint text.
+ */
 @Composable
 private fun RemarksField(
     value: String,
@@ -658,45 +867,54 @@ private fun RemarksField(
     val type = LocalType.current
     val shape = RoundedCornerShape(grid.radiusButton)
     var focused by remember { mutableStateOf(false) }
-    val remarksLabel = stringResource(R.string.ui_request_detail_remarks)
+    val fieldLabel = stringResource(R.string.ui_request_detail_remarks_label)
 
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = type.body.copy(color = UiTextPrimary),
-        cursorBrush = SolidColor(UiPrimary),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        modifier = Modifier
-            .fillMaxWidth()
-            .onFocusChanged { focused = it.isFocused }
-            // The placeholder disappears once typed; the field still needs a spoken name.
-            .semantics { contentDescription = remarksLabel },
-        decorationBox = { innerTextField ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = dimensionResource(R.dimen.ui_field_multiline_height))
-                    .clip(shape)
-                    .background(UiSurfaceSunken)
-                    .then(
-                        if (focused) {
-                            Modifier.border(dimensionResource(R.dimen.stroke_focus), UiPrimary, shape)
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .padding(grid.cardPadding),
-                contentAlignment = Alignment.TopStart,
-            ) {
-                if (value.isEmpty()) {
-                    Text(
-                        text = remarksLabel,
-                        style = type.bodyS,
-                        color = UiTextSecondary,
-                    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // The field itself carries the spoken name, so the visible label is presentation only: two
+        // name nodes would read the label twice.
+        Text(
+            text = fieldLabel,
+            style = type.overline,
+            color = UiTextSecondary,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
+
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = type.body.copy(color = UiTextPrimary),
+            cursorBrush = SolidColor(UiPrimary),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = grid.s4)
+                .onFocusChanged { focused = it.isFocused }
+                .semantics {
+                    // A contentDescription on a text field replaces its text for TalkBack, so it is
+                    // only set while the field is empty: once a reason is typed, that reason is
+                    // what has to be read back, not the label again.
+                    if (value.isEmpty()) contentDescription = fieldLabel
+                },
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = dimensionResource(R.dimen.ui_field_multiline_height))
+                        .clip(shape)
+                        .background(UiSurfaceSunken)
+                        .then(
+                            if (focused) {
+                                Modifier.border(dimensionResource(R.dimen.stroke_focus), UiPrimary, shape)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(grid.cardPadding),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    innerTextField()
                 }
-                innerTextField()
-            }
-        },
-    )
+            },
+        )
+    }
 }

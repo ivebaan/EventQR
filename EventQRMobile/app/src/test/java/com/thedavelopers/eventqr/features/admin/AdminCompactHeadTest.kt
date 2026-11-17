@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.annotation.StringRes
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.thedavelopers.eventqr.R
 import com.thedavelopers.eventqr.core.api.NetworkResult
 import com.thedavelopers.eventqr.core.api.dto.AccountRole
@@ -21,8 +22,10 @@ import com.thedavelopers.eventqr.features.admin.users.AdminAccountManagementActi
 import com.thedavelopers.eventqr.features.audit.model.dto.AuditLogResponse
 import com.thedavelopers.eventqr.features.events.model.dto.EventRequestResponse
 import com.thedavelopers.eventqr.features.users.model.dto.UserResponse
+import com.thedavelopers.eventqr.ui.components.EventQrSwipeRefreshLayout
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -70,6 +73,37 @@ class AdminCompactHeadTest {
         assertEquals(View.VISIBLE, count.visibility)
     }
 
+    /** A failed load owns the page, so it must also own the refresh cue: no strip left painted. */
+    @Test
+    fun requests_failureLeavesNoRefreshCue() {
+        val activity = requests(FakeAdminRepository(context, failRequests = true))
+        val swipe = activity.findViewById<EventQrSwipeRefreshLayout>(R.id.swipeRefreshRequests)
+        val strip = activity.findViewById<View>(R.id.progressRefresh)
+
+        swipe.isRefreshing = true
+        activity.findViewById<View>(R.id.btnErrorStripRetry).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertFalse(swipe.isRefreshing)
+        assertEquals(View.GONE, strip.visibility)
+    }
+
+    /** §6.8: one in-flow strip, indeterminate exactly while a refresh runs, hidden at both ends. */
+    @Test
+    fun requests_refreshStripTracksTheRefreshState() {
+        val activity = requests(FakeAdminRepository(context))
+        val swipe = activity.findViewById<EventQrSwipeRefreshLayout>(R.id.swipeRefreshRequests)
+        val strip = activity.findViewById<LinearProgressIndicator>(R.id.progressRefresh)
+        assertEquals(View.GONE, strip.visibility)
+
+        swipe.isRefreshing = true
+        assertEquals(View.VISIBLE, strip.visibility)
+        assertTrue(strip.isIndeterminate)
+
+        swipe.isRefreshing = false
+        assertEquals(View.GONE, strip.visibility)
+    }
+
     // ---- helpers
 
     private fun assertCompactHead(activity: Activity, @StringRes titleRes: Int) {
@@ -107,7 +141,10 @@ class AdminCompactHeadTest {
     }
 
     /** Only the calls these three screens make are faked; the rest of the repository is never reached. */
-    private class FakeAdminRepository(context: Context) : AdminRepository(context) {
+    private class FakeAdminRepository(
+        context: Context,
+        private val failRequests: Boolean = false,
+    ) : AdminRepository(context) {
         override suspend fun getCurrentUser(): NetworkResult<UserResponse> =
             NetworkResult.Success(
                 UserResponse(
@@ -120,7 +157,11 @@ class AdminCompactHeadTest {
             )
 
         override suspend fun loadAllEventRequests(): NetworkResult<List<EventRequestResponse>> =
-            NetworkResult.Success(emptyList())
+            if (failRequests) {
+                NetworkResult.Error("boom")
+            } else {
+                NetworkResult.Success(emptyList())
+            }
 
         override suspend fun loadUsersPage(
             role: AccountRole?,

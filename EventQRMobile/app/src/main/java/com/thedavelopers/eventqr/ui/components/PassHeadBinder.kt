@@ -4,7 +4,6 @@ import android.view.View
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.annotation.IdRes
 import androidx.annotation.StyleRes
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -146,7 +145,20 @@ object PassHeadBinder {
         eyebrow: String? = null,
         trailing: View? = null,
     ) {
-        root.findViewById<TextView>(R.id.passHeadTitle)?.text = title
+        val largeFont = MetricRowStacking.stacks(root.resources.configuration.fontScale)
+        root.findViewById<TextView>(R.id.passHeadTitle)?.apply {
+            text = title
+            // Above fontScale 1.3 the count beside the title needs more of the row, so the title
+            // takes a second line instead of a fragment (§4.6).
+            maxLines = if (largeFont) 2 else 1
+        }
+        root.findViewById<TextView>(R.id.passHeadTitleCount)?.apply {
+            // The 112dp cap is a small-font guarantee: autosize steps are sp, so above 1.3 the 9sp
+            // floor is already >12sp effective and no label fits the cap. Lift the cap there and let
+            // the count take the width it needs; at or below 1.3 the cap stays exactly as designed.
+            maxWidth = if (largeFont) Int.MAX_VALUE
+            else root.resources.getDimensionPixelSize(R.dimen.ui_pass_head_count_max)
+        }
         root.findViewById<TextView>(R.id.passHeadEyebrow)?.apply {
             text = eyebrow
             visibility = if (eyebrow.isNullOrBlank()) View.INVISIBLE else View.VISIBLE

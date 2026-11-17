@@ -79,6 +79,40 @@
             android:text="@string/ui_admin_filter_rejected" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 
+    <!-- §6.8: the pull-to-refresh state is this in-flow strip, not the swipe layout's raised disc
+         (suppressed in EventQrSwipeRefreshLayout). It takes its own 2dp above the list, so it never
+         covers a row. Same gutter as the chips, so it never opens a third left edge, over a hairline
+         track so the empty band still reads as a track, and it grows with the finger (determinate)
+         before it spins. No animation on show/hide: the strip is the state, it does not slide in. -->
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progressRefresh"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/ui_gutter"
+        android:layout_marginEnd="@dimen/ui_gutter"
+        android:importantForAccessibility="no"
+        android:indeterminate="true"
+        android:max="100"
+        android:visibility="gone"
+        app:hideAnimationBehavior="none"
+        app:indicatorColor="@color/ui_primary"
+        app:indicatorTrackGapSize="0dp"
+        app:showAnimationBehavior="none"
+        app:trackColor="@color/ui_hairline"
+        app:trackStopIndicatorSize="0dp"
+        app:trackThickness="@dimen/ui_refresh_strip_height" />
+
+    <!-- §5.16 / §6.8 #2: a failed refresh over readable rows reports here and keeps them. Only a
+         zero-row failure takes the empty slot. -->
+    <include
+        android:id="@+id/errorStrip"
+        layout="@layout/include_error_strip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/ui_gutter"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/ui_gutter" />
+
     <com.thedavelopers.eventqr.ui.components.EventQrSwipeRefreshLayout
         android:id="@+id/swipeRefreshRequests"
         android:layout_width="match_parent"

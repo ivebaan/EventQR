@@ -7,7 +7,9 @@
         submitted date as two meta lines; ONE trailing status badge, a sibling of the text column,
         so the title owns the full column width.
         `fontScale > 1.3`: the binder moves the badge under the meta lines (space_8 above) - a
-        trailing badge beside a grown title leaves too little for the name.
+        trailing badge beside a grown title leaves too little for the name - and lifts the title's
+        one-line cap to two lines (§5.5), so a real event name is not cut to a fragment. Both are
+        set on every bind, so a recycled row keeps no stale cap; the XML stays at one line.
 
     TalkBack: the whole row is one node (the requestRow's contentDescription set by the adapter);
     every child is `importantForAccessibility="no"`, so the status word is read once, in order.
